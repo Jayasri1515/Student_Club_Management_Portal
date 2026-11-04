@@ -470,6 +470,7 @@ function App() {
                                                     onClick={() => setRenameTarget(club)}
                                                     className="button list-update"
                                                     disabled={!canUpdateClub(loggedInUser, club)}
+                                                    title={canUpdateClub(loggedInUser, club) ? undefined : 'Only Admins can update clubs'}
                                                 >
                                                     Update
                                                 </button>
@@ -477,6 +478,7 @@ function App() {
                                                     onClick={() => setDeleteTarget(club)}
                                                     className="button list-delete"
                                                     disabled={!canDeleteClub(loggedInUser, club)}
+                                                    title={canDeleteClub(loggedInUser, club) ? undefined : 'Only Admins can delete clubs'}
                                                 >
                                                     Delete
                                                 </button>

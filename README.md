@@ -51,14 +51,14 @@ Example staging build: `VITE_API_BASE_URL=https://stage-api.example.com/api npm 
 
 ## Permission rules (UI)
 
-Defined only in `src/utils/permissions.js`. They preserve the behavior that existed before
-the module was introduced; the backend performs **no** role or ownership checks.
+Defined only in `src/utils/permissions.js`. The rules below are confirmed by the product
+owner. The backend performs **no** role or ownership checks, so the UI is the only gate.
 
 | Action | Rule |
 | ------ | ---- |
 | Create Club | `Admin` only |
+| Update Club / Delete Club | `Admin` only (confirmed); Leaders and Students see the controls disabled |
 | Create Activity | any logged-in user except `Student` (Admin, Leader) |
-| Update Club / Delete Club | any logged-in user - **needs rule confirmation** (unchanged; e.g. Admin-only or Leader-of-that-club?) |
 | Join Club | any logged-in user |
 
 ## Backend contract notes and known limitations

@@ -1,20 +1,17 @@
 // REQ-003: centralized UI permission rules.
 //
-// These helpers PRESERVE the behavior that shipped before this module existed
-// (no new policy has been invented). The backend (back_end branch) performs no
-// role or ownership checks at all, so the UI is the only gate.
+// The backend (back_end branch) performs no role or ownership checks at all, so
+// the UI is the only gate. Rules (confirmed by the product owner):
 //
 //   Create Club      : role === 'Admin' only
+//   Update Club      : role === 'Admin' only  (confirmed: "Admin only can update or delete clubs")
+//   Delete Club      : role === 'Admin' only  (confirmed)
 //   Create Activity  : any logged-in user whose role is not 'Student'
-//   Update Club      : any logged-in user (unchanged)  -> NEEDS RULE CONFIRMATION
-//   Delete Club      : any logged-in user (unchanged)  -> NEEDS RULE CONFIRMATION
-//   Join Club        : any logged-in user (unchanged)
+//   Join Club        : any logged-in user
 //
-// Update/Delete Club are suspicious (a Student can currently rename/delete any
-// club, and the backend does not stop them). They are kept as-is until the
-// product owner confirms the rule (e.g. Admin-only, or Leader of that club only
-// via `club.leader.id === user.id`). The `club` argument is accepted already so
-// an ownership rule can be added here without touching call sites.
+// Leaders and Students may not update or delete clubs, including a club they lead.
+// The `club` argument is accepted (and currently unused) so call sites need not
+// change if an ownership rule is ever added.
 //
 // Activity update/delete: the backend exposes no such endpoints (REQ-008), so
 // there is intentionally no permission helper for them yet.
@@ -27,18 +24,20 @@ export const ROLES = Object.freeze({
 
 const isLoggedIn = (user) => Boolean(user);
 
+const isAdmin = (user) => isLoggedIn(user) && user.role === ROLES.ADMIN;
+
 export function canCreateClub(user) {
-    return isLoggedIn(user) && user.role === ROLES.ADMIN;
+    return isAdmin(user);
 }
 
-// eslint-disable-next-line no-unused-vars -- `club` reserved for ownership rules (needs rule confirmation)
+// eslint-disable-next-line no-unused-vars -- `club` kept for call-site stability (rule is Admin only)
 export function canUpdateClub(user, club) {
-    return isLoggedIn(user);
+    return isAdmin(user);
 }
 
-// eslint-disable-next-line no-unused-vars -- `club` reserved for ownership rules (needs rule confirmation)
+// eslint-disable-next-line no-unused-vars -- `club` kept for call-site stability (rule is Admin only)
 export function canDeleteClub(user, club) {
-    return isLoggedIn(user);
+    return isAdmin(user);
 }
 
 export function canCreateActivity(user) {
