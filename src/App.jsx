@@ -1,8 +1,22 @@
 import { useState, useEffect } from 'react';
 import './App.css';
+import { apiClient } from './services/apiClient.js';
+import {
+    canCreateClub,
+    canUpdateClub,
+    canDeleteClub,
+    canCreateActivity,
+    canJoinClub,
+} from './utils/permissions.js';
+import { useNotifications } from './hooks/useNotifications.js';
+import NotificationContainer from './components/Notification.jsx';
+import RenameClubModal from './components/RenameClubModal.jsx';
+import ConfirmDialog from './components/ConfirmDialog.jsx';
+import ActivityItem from './components/ActivityItem.jsx';
+import ClubBrowser from './components/ClubBrowser.jsx';
 
-// The base URL for your Spring Boot backend
-const API_BASE_URL = 'http://localhost:8082/api';
+// The backend base URL now lives in src/config/apiConfig.js (VITE_API_BASE_URL, REQ-001)
+// and all HTTP calls go through src/services/apiClient.js (REQ-004).
 
 // --- Login Pop-up Component (Moved outside of App) ---
 const LoginPopup = ({ showLoginPopup, setShowLoginPopup, handleLogin, loginDetails, setLoginDetails, setShowRegisterPopup }) => (
@@ -144,13 +158,20 @@ function App() {
 
     // State to manage data from the backend
     const [clubs, setClubs] = useState([]);
+    const [clubsPaging, setClubsPaging] = useState({ nextPage: 1, hasMore: false });
     const [activities, setActivities] = useState([]);
     const [memberships, setMemberships] = useState([]);
 
     // State for forms
     const [newClub, setNewClub] = useState({ name: '', description: '' });
-    const [newActivity, setNewActivity] = useState({ clubId: '', name: '', description: '' });
-    const [joinClubId, setJoinClubId] = useState('');
+    const [newActivity, setNewActivity] = useState({ clubId: '', title: '', description: '' });
+
+    // State for in-app dialogs / feedback (REQ-002, REQ-005)
+    const { notifications, dismiss, success, error: notifyError, info } = useNotifications();
+    const [renameTarget, setRenameTarget] = useState(null);
+    const [renaming, setRenaming] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [joiningClubId, setJoiningClubId] = useState(null);
 
     /**
      * This useEffect hook is the central point for fetching data.
@@ -164,81 +185,67 @@ function App() {
                 fetchAllActivities();
             } else if (currentPage === 'memberships') {
                 fetchMemberships(loggedInUser.id);
+            } else if (currentPage === 'join') {
+                fetchClubs();
+                fetchMemberships(loggedInUser.id);
             }
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on page/user only (as before)
     }, [currentPage, loggedInUser]);
 
     // --- API Call functions ---
-    const fetchClubs = async () => {
+    const fetchClubs = async (page = 0) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/clubs/getclubs`);
-            if (!response.ok) throw new Error(`Failed to fetch clubs: ${response.statusText}`);
-            const data = await response.json();
-            setClubs(data.content);
+            const data = await apiClient.get(`/clubs/getclubs?page=${page}`);
+            const content = data?.content ?? [];
+            setClubs((previous) => (page === 0 ? content : [...previous, ...content]));
+            setClubsPaging({ nextPage: page + 1, hasMore: data?.last === false });
         } catch (error) {
-            alert(`Error fetching clubs: ${error.message}`);
+            notifyError(`Error fetching clubs: ${error.message}`);
         }
     };
 
     const fetchAllActivities = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/activities/getactivities`);
-            if (!response.ok) throw new Error(`Failed to fetch activities: ${response.statusText}`);
-            const data = await response.json();
-            setActivities(data.content);
-            if (data.content.length === 0) {
-                alert('Successfully fetched, but no activities found.');
-            }
+            const data = await apiClient.get('/activities/getactivities');
+            setActivities(data?.content ?? []);
         } catch (error) {
-            alert(`Error fetching all activities: ${error.message}`);
+            notifyError(`Error fetching all activities: ${error.message}`);
         }
     };
     
     const fetchActivitiesForClub = async (clubId) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/activities/club/${clubId}`);
-            if (!response.ok) throw new Error(`Failed to fetch activities: ${response.statusText}`);
-            const data = await response.json();
-            setActivities(data.content);
-            alert(`Activities for club ${clubId} fetched successfully.`);
+            const data = await apiClient.get(`/activities/club/${clubId}`);
+            setActivities(data?.content ?? []);
+            info(`Showing activities for club ${clubId}.`);
             setCurrentPage('activities'); 
         } catch (error) {
-            alert(`Error fetching activities: ${error.message}`);
+            notifyError(`Error fetching activities: ${error.message}`);
         }
     };
     
     const fetchMemberships = async (userId) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/memberships/user/${userId}`);
-            if (!response.ok) throw new Error(`Failed to fetch memberships: ${response.statusText}`);
-            const data = await response.json();
-            setMemberships(data);
+            const data = await apiClient.get(`/memberships/user/${userId}`);
+            setMemberships(Array.isArray(data) ? data : []);
         } catch (error) {
-            alert(`Error fetching memberships: ${error.message}`);
+            notifyError(`Error fetching memberships: ${error.message}`);
         }
     };
 
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(loginDetails),
-            });
-            if (response.status === 200) {
-                const user = await response.json();
-                setLoggedInUser(user);
-                alert(`Login successful! Welcome, ${user.username}.`);
-                setShowLoginPopup(false);
-                setCurrentPage('dashboard');
-            } else {
-                const errorMessage = await response.text();
-                alert(`Login failed: ${errorMessage}`);
-                setLoggedInUser(null);
-            }
+            // The backend returns the User entity (no token) - see apiClient.js.
+            const user = await apiClient.post('/auth/login', loginDetails);
+            setLoggedInUser(user);
+            success(`Login successful! Welcome, ${user.username}.`);
+            setShowLoginPopup(false);
+            setCurrentPage('dashboard');
         } catch (error) {
-            alert(`Login Error: ${error.message}`);
+            notifyError(`Login failed: ${error.message}`);
+            setLoggedInUser(null);
         }
     };
 
@@ -247,131 +254,112 @@ function App() {
         
         // Fun human verification check
         if (humanVerification.toLowerCase().trim() !== 'a needle') {
-            alert('That\'s not the answer! I think you are not a human, Try again.');
+            notifyError("That's not the answer! I think you are not a human, Try again.");
             return; 
         }
 
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(registerDetails),
-            });
-            if (response.status === 200) {
-                const user = await response.json();
-                alert(`Registration successful! You can now log in.`);
-                setRegisterDetails({ username: '', password: '', email: '', role: 'Student' });
-                setShowRegisterPopup(false);
-                setShowLoginPopup(true);
-            } else {
-                const errorMessage = await response.text();
-                alert(`Registration failed: ${errorMessage}`);
+            const result = await apiClient.post('/auth/register', registerDetails);
+            // The backend answers HTTP 200 with a plain-text message (instead of a user)
+            // when the username is already taken.
+            if (typeof result === 'string') {
+                notifyError(`Registration failed: ${result}`);
+                return;
             }
+            success('Registration successful! You can now log in.');
+            setRegisterDetails({ username: '', password: '', email: '', role: 'Student' });
+            setShowRegisterPopup(false);
+            setShowLoginPopup(true);
         } catch (error) {
-            alert(`Registration Error: ${error.message}`);
+            notifyError(`Registration failed: ${error.message}`);
         }
     };
 
     const handleCreateClub = async (e) => {
         e.preventDefault();
+        if (!canCreateClub(loggedInUser)) return;
         try {
             const clubData = { ...newClub, leaderId: loggedInUser.id };
-            const response = await fetch(`${API_BASE_URL}/clubs`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(clubData),
-            });
-            if (!response.ok) throw new Error(`Failed to create club: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Club created: ${data.name} (ID: ${data.id})`);
+            const data = await apiClient.post('/clubs', clubData);
+            success(`Club created: ${data.name} (ID: ${data.id})`);
             setNewClub({ name: '', description: '' });
             fetchClubs();
         } catch (error) {
-            alert(`Create Club Error: ${error.message}`);
+            notifyError(`Create Club Error: ${error.message}`);
         }
     };
 
-    const handleUpdateClub = async (id) => {
-        const newName = prompt('Enter new club name:');
-        if (!newName) return;
+    const handleUpdateClub = async (club, newName) => {
+        if (!canUpdateClub(loggedInUser, club)) return;
+        setRenaming(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/clubs/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName }),
+            // PUT /clubs/{id} overwrites name, description AND leader with the request
+            // body, so send the existing description/leader back to avoid wiping them.
+            const data = await apiClient.put(`/clubs/${club.id}`, {
+                name: newName,
+                description: club.description ?? null,
+                leader: club.leader ?? null,
             });
-            if (!response.ok) throw new Error(`Failed to update club: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Club updated to: ${data.name}`);
+            success(`Club updated to: ${data.name}`);
+            setRenameTarget(null);
             fetchClubs();
         } catch (error) {
-            alert(`Update Club Error: ${error.message}`);
+            notifyError(`Update Club Error: ${error.message}`);
+        } finally {
+            setRenaming(false);
         }
     };
 
-    const handleDeleteClub = async (id) => {
-        if (window.confirm('Are you sure you want to delete this club? This action cannot be undone.')) {
-            try {
-                const response = await fetch(`${API_BASE_URL}/clubs/${id}`, { method: 'DELETE' });
-                if (!response.ok) throw new Error(`Failed to delete club: ${response.statusText}`);
-                alert('Club deleted successfully.');
-                fetchClubs();
-            } catch (error) {
-                alert(`Delete Club Error: ${error.message}`);
-            }
+    const handleDeleteClub = async (club) => {
+        setDeleteTarget(null);
+        if (!canDeleteClub(loggedInUser, club)) return;
+        try {
+            await apiClient.delete(`/clubs/${club.id}`);
+            success('Club deleted successfully.');
+            fetchClubs();
+        } catch (error) {
+            notifyError(`Delete Club Error: ${error.message}`);
         }
     };
 
     const handleCreateActivity = async (e) => {
         e.preventDefault();
+        if (!canCreateActivity(loggedInUser)) return;
         try {
+            // Backend Activity fields are { title, description, date, club }.
             const activityData = {
-                ...newActivity,
+                title: newActivity.title,
+                description: newActivity.description,
                 club: { id: newActivity.clubId }
             };
-            const response = await fetch(`${API_BASE_URL}/activities`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(activityData),
-            });
-            if (!response.ok) throw new Error(`Failed to create activity: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Activity created: ${data.name} (Club ID: ${data.club.id})`);
-            setNewActivity({ clubId: '', name: '', description: '' });
+            const data = await apiClient.post('/activities', activityData);
+            success(`Activity created: ${data?.title ?? newActivity.title} (Club ID: ${data?.club?.id ?? newActivity.clubId})`);
+            setNewActivity({ clubId: '', title: '', description: '' });
             fetchAllActivities();
         } catch (error) {
-            alert(`Create Activity Error: ${error.message}`);
+            notifyError(`Create Activity Error: ${error.message}`);
         }
     };
     
-    const handleJoinClub = async (e) => {
-        e.preventDefault();
+    const handleJoinClub = async (club) => {
+        if (!canJoinClub(loggedInUser)) {
+            notifyError('Please log in first to join a club.');
+            return;
+        }
+        setJoiningClubId(club.id);
         try {
-            if (!loggedInUser) {
-                alert('Please log in first to join a club.');
-                return;
-            }
-            
+            // Existing join endpoint and payload shape.
             const membershipData = {
                 user: { id: loggedInUser.id },
-                club: { id: joinClubId }
+                club: { id: club.id }
             };
-
-            const response = await fetch(`${API_BASE_URL}/memberships/join`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(membershipData),
-            });
-            if (response.ok) {
-                const data = await response.json();
-                alert(`Successfully joined club ${data.club.id}.`);
-                setJoinClubId('');
-            } else {
-                const errorMessage = await response.text();
-                alert(`Failed to join club: ${errorMessage}`);
-            }
+            const data = await apiClient.post('/memberships/join', membershipData);
+            success(`Successfully joined ${data?.club?.name ?? club.name}.`);
+            fetchMemberships(loggedInUser.id);
         } catch (error) {
-            alert(`Join Club Error: ${error.message}`);
+            notifyError(`Failed to join club: ${error.message}`);
+        } finally {
+            setJoiningClubId(null);
         }
     };
 
@@ -420,7 +408,7 @@ function App() {
                                 setClubs([]);
                                 setActivities([]);
                                 setMemberships([]);
-                                alert('Logged out.');
+                                info('Logged out.');
                             }} className="button-large logout-button">
                                 Logout
                             </button>
@@ -458,7 +446,8 @@ function App() {
                                 <button
                                     type="submit"
                                     className="button primary"
-                                    disabled={loggedInUser.role !== 'Admin'}
+                                    disabled={!canCreateClub(loggedInUser)}
+                                    title={canCreateClub(loggedInUser) ? undefined : 'Only Admins can create clubs'}
                                 >
                                     Create Club
                                 </button>
@@ -477,8 +466,20 @@ function App() {
                                             </span>
                                             <div className="list-item-buttons">
                                                 <button onClick={() => fetchActivitiesForClub(club.id)} className="button list-update">View Activities</button>
-                                                <button onClick={() => handleUpdateClub(club.id)} className="button list-update">Update</button>
-                                                <button onClick={() => handleDeleteClub(club.id)} className="button list-delete">Delete</button>
+                                                <button
+                                                    onClick={() => setRenameTarget(club)}
+                                                    className="button list-update"
+                                                    disabled={!canUpdateClub(loggedInUser, club)}
+                                                >
+                                                    Update
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteTarget(club)}
+                                                    className="button list-delete"
+                                                    disabled={!canDeleteClub(loggedInUser, club)}
+                                                >
+                                                    Delete
+                                                </button>
                                             </div>
                                         </li>
                                     ))
@@ -486,6 +487,11 @@ function App() {
                                     <li className="no-data-text">No clubs found.</li>
                                 )}
                             </ul>
+                            {clubsPaging.hasMore && (
+                                <button className="button secondary" onClick={() => fetchClubs(clubsPaging.nextPage)}>
+                                    Load more clubs
+                                </button>
+                            )}
                         </div>
                     </div>
                 );
@@ -511,9 +517,9 @@ function App() {
                                 />
                                 <input 
                                     type="text" 
-                                    placeholder="Activity Name" 
-                                    value={newActivity.name} 
-                                    onChange={e => setNewActivity({ ...newActivity, name: e.target.value })} 
+                                    placeholder="Activity Title" 
+                                    value={newActivity.title} 
+                                    onChange={e => setNewActivity({ ...newActivity, title: e.target.value })} 
                                     className="form-input"
                                 />
                                 <input 
@@ -526,7 +532,8 @@ function App() {
                                 <button
                                     type="submit"
                                     className="button primary"
-                                    disabled={loggedInUser.role === 'Student'}
+                                    disabled={!canCreateActivity(loggedInUser)}
+                                    title={canCreateActivity(loggedInUser) ? undefined : 'Students cannot create activities'}
                                 >
                                     Create Activity
                                 </button>
@@ -537,12 +544,8 @@ function App() {
                             <h3 className="section-title">Activities List</h3>
                             <ul className="list-group">
                                 {activities.length > 0 ? (
-                                    activities.map(activity => (
-                                        <li key={activity.id} className="list-item">
-                                            <span className="list-item-text">
-                                                <strong>{activity.club.name}</strong> -{activity.description} (Club ID: {activity.id})
-                                            </span>
-                                        </li>
+                                    activities.map((activity, index) => (
+                                        <ActivityItem key={activity?.id ?? `activity-${index}`} activity={activity} />
                                     ))
                                 ) : (
                                     <li className="no-data-text">No activities found.</li>
@@ -553,28 +556,22 @@ function App() {
                 );
             case 'join':
                 return (
-                    <div className="card card-sm">
+                    <div className="card card-2xl">
                         <div className="header-with-button">
-                            <h2 className="card-title">Join a Club &#127882;</h2>
+                            <h2 className="dashboard-card-title">Join a Club &#127882;</h2>
                             <button onClick={() => setCurrentPage('dashboard')} className="button secondary">
                                 Back
                             </button>
                         </div>
-                        <form onSubmit={handleJoinClub} className="form-container">
-                            <input 
-                                type="text" 
-                                placeholder="Club ID to join" 
-                                value={joinClubId} 
-                                onChange={e => setJoinClubId(e.target.value)} 
-                                className="form-input"
-                            />
-                            <button 
-                                type="submit" 
-                                className="button primary"
-                            >
-                                Join Club
-                            </button>
-                        </form>
+                        <ClubBrowser
+                            clubs={clubs}
+                            joinedClubIds={memberships.map(membership => membership?.club?.id)}
+                            canJoin={canJoinClub(loggedInUser)}
+                            joiningClubId={joiningClubId}
+                            hasMore={clubsPaging.hasMore}
+                            onJoin={handleJoinClub}
+                            onLoadMore={() => fetchClubs(clubsPaging.nextPage)}
+                        />
                     </div>
                 );
             case 'memberships':
@@ -588,13 +585,14 @@ function App() {
                         </div>
                         <div className="section-container">
                             <h3 className="section-title">Clubs I Have Joined</h3>
+                            {/* REQ-006: leaving a club is not offered - the backend has no leave/delete-membership endpoint. */}
                             <ul className="list-group">
                                 {memberships.length > 0 ? (
                                     memberships.map(membership => (
                                         <li key={membership.id} className="list-item">
                                             <span className="list-item-text">
-                                                <strong>{membership.club.name}</strong> (ID: {membership.club.id})
-                                                {membership.club.description && <span className="description-text"> - {membership.club.description}</span>}
+                                                <strong>{membership.club?.name ?? 'Unknown club'}</strong> (ID: {membership.club?.id ?? 'N/A'})
+                                                {membership.club?.description && <span className="description-text"> - {membership.club.description}</span>}
                                             </span>
                                         </li>
                                     ))
@@ -640,6 +638,24 @@ function App() {
                     setHumanVerification={setHumanVerification}
                 />
             )}
+            {renameTarget && (
+                <RenameClubModal
+                    club={renameTarget}
+                    submitting={renaming}
+                    onSubmit={(newName) => handleUpdateClub(renameTarget, newName)}
+                    onCancel={() => setRenameTarget(null)}
+                />
+            )}
+            {deleteTarget && (
+                <ConfirmDialog
+                    title="Delete club"
+                    message={`Are you sure you want to delete "${deleteTarget.name}"? This action cannot be undone.`}
+                    confirmLabel="Delete"
+                    onConfirm={() => handleDeleteClub(deleteTarget)}
+                    onCancel={() => setDeleteTarget(null)}
+                />
+            )}
+            <NotificationContainer notifications={notifications} onDismiss={dismiss} />
         </div>
     );
 }
