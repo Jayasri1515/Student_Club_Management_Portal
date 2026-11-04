@@ -13,7 +13,7 @@ const leader = { id: 2, role: 'Leader' }
 const student = { id: 3, role: 'Student' }
 const club = { id: 10, name: 'Chess', leader: { id: 2 } }
 
-describe('permissions (behavior preserved from the original UI)', () => {
+describe('permissions', () => {
   it('exposes the three roles used by registration', () => {
     expect(ROLES).toEqual({ ADMIN: 'Admin', LEADER: 'Leader', STUDENT: 'Student' })
   })
@@ -30,11 +30,27 @@ describe('permissions (behavior preserved from the original UI)', () => {
     expect(canCreateActivity(student)).toBe(false)
   })
 
-  it('Update/Delete Club are open to any logged-in user (unchanged; needs rule confirmation)', () => {
-    for (const user of [admin, leader, student]) {
-      expect(canUpdateClub(user, club)).toBe(true)
-      expect(canDeleteClub(user, club)).toBe(true)
-    }
+  it('Update Club is Admin only (confirmed rule)', () => {
+    expect(canUpdateClub(admin, club)).toBe(true)
+    expect(canUpdateClub(leader, club)).toBe(false)
+    expect(canUpdateClub(student, club)).toBe(false)
+  })
+
+  it('Delete Club is Admin only (confirmed rule)', () => {
+    expect(canDeleteClub(admin, club)).toBe(true)
+    expect(canDeleteClub(leader, club)).toBe(false)
+    expect(canDeleteClub(student, club)).toBe(false)
+  })
+
+  it('a Leader cannot update or delete the club they lead', () => {
+    const ownClub = { id: 10, name: 'Chess', leader: { id: leader.id } }
+    expect(canUpdateClub(leader, ownClub)).toBe(false)
+    expect(canDeleteClub(leader, ownClub)).toBe(false)
+  })
+
+  it('Admin may update/delete regardless of the club argument', () => {
+    expect(canUpdateClub(admin)).toBe(true)
+    expect(canDeleteClub(admin, null)).toBe(true)
   })
 
   it('Join Club is open to any logged-in user', () => {

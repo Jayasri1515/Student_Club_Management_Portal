@@ -145,6 +145,35 @@ describe('App integration (mocked backend)', () => {
     expect(await screen.findByRole('button', { name: 'Create Activity' })).toBeEnabled()
   })
 
+  it.each(['Leader', 'Student'])('REQ-003: %s cannot update or delete clubs (controls disabled, no requests sent)', async (role) => {
+    const { user, calls } = await loginAs(role, { [`GET /memberships/user/${users[role].id}`]: () => json([]) })
+    await user.click(screen.getByRole('button', { name: 'Go to Club Management' }))
+    // Led-by-self club is also locked for the Leader.
+    for (const name of ['Chess Club', 'Robotics']) {
+      const row = (await screen.findByText(name)).closest('li')
+      const update = within(row).getByRole('button', { name: 'Update' })
+      const del = within(row).getByRole('button', { name: 'Delete' })
+      expect(update).toBeDisabled()
+      expect(del).toBeDisabled()
+      expect(update).toHaveAttribute('title', 'Only Admins can update clubs')
+      expect(del).toHaveAttribute('title', 'Only Admins can delete clubs')
+      await user.click(update)
+      await user.click(del)
+    }
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PUT' || c.method === 'DELETE')).toBe(false)
+  })
+
+  it('REQ-003: Admin has enabled Update and Delete controls on every club', async () => {
+    const { user } = await loginAs('Admin')
+    await user.click(screen.getByRole('button', { name: 'Go to Club Management' }))
+    for (const name of ['Chess Club', 'Robotics']) {
+      const row = (await screen.findByText(name)).closest('li')
+      expect(within(row).getByRole('button', { name: 'Update' })).toBeEnabled()
+      expect(within(row).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    }
+  })
+
   it('REQ-003: Admin can create a club (payload unchanged: name, description, leaderId)', async () => {
     const { user, calls } = await loginAs('Admin', {
       'POST /clubs': (body) => json({ id: 7, ...body }),
