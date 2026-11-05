@@ -3,19 +3,24 @@
 
 import { useState } from 'react';
 import { filterClubs } from '../utils/clubSearch.js';
+import { normalizeId, sameId } from '../utils/ids.js';
 
 export default function ClubBrowser({
     clubs,
     joinedClubIds,
     canJoin,
     joiningClubId = null,
+    joiningClubIds = [],
     hasMore = false,
+    loadingMore = false,
     onJoin,
     onLoadMore,
 }) {
     const [query, setQuery] = useState('');
     const visibleClubs = filterClubs(clubs, query);
-    const joined = new Set((joinedClubIds ?? []).map(String));
+    // CR-001: IDs may be numbers (backend) or strings; always compare normalized.
+    const joined = new Set((joinedClubIds ?? []).map(normalizeId).filter((id) => id !== null));
+    const joiningIds = [joiningClubId, ...(joiningClubIds ?? [])];
 
     return (
         <div className="section-container">
@@ -31,7 +36,8 @@ export default function ClubBrowser({
             <ul className="list-group" aria-label="Available clubs">
                 {visibleClubs.length > 0 ? (
                     visibleClubs.map((club) => {
-                        const alreadyJoined = joined.has(String(club.id));
+                        const alreadyJoined = joined.has(normalizeId(club.id));
+                        const joining = joiningIds.some((id) => sameId(id, club.id));
                         return (
                             <li key={club.id} className="list-item">
                                 <span className="list-item-text">
@@ -42,7 +48,8 @@ export default function ClubBrowser({
                                     <button
                                         type="button"
                                         className="button primary"
-                                        disabled={!canJoin || alreadyJoined || joiningClubId === club.id}
+                                        disabled={!canJoin || alreadyJoined || joining}
+                                        aria-busy={joining || undefined}
                                         aria-label={`${alreadyJoined ? 'Already joined' : 'Join'} ${club.name}`}
                                         onClick={() => onJoin(club)}
                                     >
@@ -59,7 +66,7 @@ export default function ClubBrowser({
                 )}
             </ul>
             {hasMore && (
-                <button type="button" className="button secondary" onClick={onLoadMore}>
+                <button type="button" className="button secondary" disabled={loadingMore} onClick={onLoadMore}>
                     Load more clubs
                 </button>
             )}

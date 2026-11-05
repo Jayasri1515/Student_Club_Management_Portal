@@ -12,13 +12,24 @@
 
 import { API_BASE_URL } from '../config/apiConfig.js';
 
-/** Error thrown for every failed request, with a user-presentable message. */
+/**
+ * Default per-request timeout (CR-005). Generous on purpose: it only exists so a
+ * hung connection cannot leave the UI waiting forever. Override per request with
+ * `timeoutMs` (0, null or Infinity disables it).
+ */
+export const DEFAULT_TIMEOUT_MS = 30000;
+
+/**
+ * Error thrown for every failed request, with a user-presentable message.
+ * `code` is 'timeout' or 'aborted' for those cases, otherwise null.
+ */
 export class ApiError extends Error {
-    constructor(message, { status = 0, data = null, cause } = {}) {
+    constructor(message, { status = 0, data = null, cause, code = null } = {}) {
         super(message, cause ? { cause } : undefined);
         this.name = 'ApiError';
         this.status = status;
         this.data = data;
+        this.code = code;
     }
 }
 
@@ -57,30 +68,66 @@ export function extractErrorMessage(data, response) {
 /**
  * Perform a request against the backend.
  * Resolves with the parsed body (object/array, string, or null for empty body).
- * Rejects with ApiError (status 0 for network failures).
+ * Rejects with ApiError (status 0 for network failures, timeouts and cancellation).
+ *
+ * Options: method, body, headers, baseUrl, plus
+ *  - timeoutMs: abort the request (including reading the body) after this long
+ *  - signal: an AbortSignal the caller can use to cancel the request
  */
-export async function request(path, { method = 'GET', body, headers, baseUrl = API_BASE_URL } = {}) {
+export async function request(
+    path,
+    { method = 'GET', body, headers, baseUrl = API_BASE_URL, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {},
+) {
     const init = { method, headers: { Accept: 'application/json', ...headers } };
     if (body !== undefined) {
         init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
     }
 
-    let response;
+    const controller = new AbortController();
+    init.signal = controller.signal;
+
+    let timedOut = false;
+    const timer =
+        Number.isFinite(timeoutMs) && timeoutMs > 0
+            ? setTimeout(() => {
+                  timedOut = true;
+                  controller.abort();
+              }, timeoutMs)
+            : null;
+    const forwardAbort = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', forwardAbort, { once: true });
+    }
+
     try {
-        response = await fetch(buildUrl(baseUrl, path), init);
+        const response = await fetch(buildUrl(baseUrl, path), init);
+        const data = await parseBody(response);
+        if (!response.ok) {
+            throw new ApiError(extractErrorMessage(data, response), { status: response.status, data });
+        }
+        return data;
     } catch (error) {
+        if (error instanceof ApiError) throw error;
+        if (timedOut) {
+            const message =
+                method === 'GET'
+                    ? 'The server took too long to respond. Please try again.'
+                    : 'The server took too long to respond. The action may not have completed, so please check before trying again.';
+            throw new ApiError(message, { status: 0, cause: error, code: 'timeout' });
+        }
+        if (signal?.aborted) {
+            throw new ApiError('The request was cancelled.', { status: 0, cause: error, code: 'aborted' });
+        }
         throw new ApiError('Unable to reach the server. Please check your connection and try again.', {
             status: 0,
             cause: error,
         });
+    } finally {
+        if (timer !== null) clearTimeout(timer);
+        signal?.removeEventListener('abort', forwardAbort);
     }
-
-    const data = await parseBody(response);
-    if (!response.ok) {
-        throw new ApiError(extractErrorMessage(data, response), { status: response.status, data });
-    }
-    return data;
 }
 
 export const apiClient = {

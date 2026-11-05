@@ -1,7 +1,11 @@
-// REQ-002: accessible modal dialog.
-// - role="dialog" + aria-modal="true" + aria-labelledby the title
-// - focus moves into the dialog on open and is trapped with Tab / Shift+Tab
-// - ESC (or a backdrop click) calls onClose
+// REQ-002 / CR-006: accessible modal dialog.
+// - role="dialog" + aria-modal="true" + aria-labelledby the title (+ optional aria-describedby)
+// - focus moves into the dialog on open (an element marked data-autofocus wins,
+//   then the first form field, then the first focusable element, then the dialog)
+// - Tab / Shift+Tab are trapped inside the dialog, including when focus has
+//   escaped to the page behind it
+// - ESC closes only the top-most open dialog; a backdrop click calls onClose
+//   unless closeOnBackdrop is false
 // - focus returns to the element that opened the dialog when it closes
 // Render it conditionally: it is "open" for as long as it is mounted.
 
@@ -10,7 +14,10 @@ import { useEffect, useId, useRef } from 'react';
 const FOCUSABLE =
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export default function Modal({ title, onClose, children }) {
+// Open dialogs, oldest first. Only the last one reacts to the keyboard.
+const openDialogs = [];
+
+export default function Modal({ title, onClose, children, describedBy, closeOnBackdrop = true }) {
     const titleId = useId();
     const dialogRef = useRef(null);
     const onCloseRef = useRef(onClose);
@@ -22,50 +29,64 @@ export default function Modal({ title, onClose, children }) {
     useEffect(() => {
         const opener = document.activeElement;
         const dialog = dialogRef.current;
-        const focusables = dialog.querySelectorAll(FOCUSABLE);
-        // Prefer the first form field; fall back to the first focusable, then the dialog.
-        const initial = dialog.querySelector('input, select, textarea') ?? focusables[0] ?? dialog;
+        const token = {};
+        openDialogs.push(token);
+
+        const initial =
+            dialog.querySelector('[data-autofocus]') ??
+            dialog.querySelector('input, select, textarea') ??
+            dialog.querySelector(FOCUSABLE) ??
+            dialog;
         initial.focus();
 
         const handleKeyDown = (event) => {
+            if (openDialogs[openDialogs.length - 1] !== token) return;
+
             if (event.key === 'Escape') {
-                event.stopPropagation();
+                event.preventDefault();
                 onCloseRef.current?.();
+                return;
+            }
+
+            if (event.key !== 'Tab') return;
+            const items = Array.from(dialog.querySelectorAll(FOCUSABLE));
+            if (items.length === 0) {
+                event.preventDefault();
+                dialog.focus();
+                return;
+            }
+            const first = items[0];
+            const last = items[items.length - 1];
+            const active = document.activeElement;
+            if (!dialog.contains(active)) {
+                // Focus escaped (e.g. clicked on the backdrop): pull it back in.
+                event.preventDefault();
+                (event.shiftKey ? last : first).focus();
+            } else if (event.shiftKey && (active === first || active === dialog)) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
             }
         };
         document.addEventListener('keydown', handleKeyDown);
 
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
+            const index = openDialogs.indexOf(token);
+            if (index !== -1) openDialogs.splice(index, 1);
             if (opener && typeof opener.focus === 'function' && opener.isConnected) {
                 opener.focus();
             }
         };
     }, []);
 
-    const handleTrapFocus = (event) => {
-        if (event.key !== 'Tab') return;
-        const items = Array.from(dialogRef.current.querySelectorAll(FOCUSABLE));
-        if (items.length === 0) {
-            event.preventDefault();
-            return;
-        }
-        const first = items[0];
-        const last = items[items.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
-            event.preventDefault();
-            last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-        }
-    };
-
     return (
         <div
             className="popup-backdrop slide-in"
             onMouseDown={(event) => {
-                if (event.target === event.currentTarget) onClose?.();
+                if (closeOnBackdrop && event.target === event.currentTarget) onClose?.();
             }}
         >
             <div
@@ -74,8 +95,8 @@ export default function Modal({ title, onClose, children }) {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
+                aria-describedby={describedBy}
                 tabIndex={-1}
-                onKeyDown={handleTrapFocus}
             >
                 <div className="card card-sm">
                     <div className="header-with-button">

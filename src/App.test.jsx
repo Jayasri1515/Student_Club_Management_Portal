@@ -21,7 +21,7 @@ async function loginAs(role, extraHandlers = {}) {
     'POST /auth/login': () => json(users[role]),
     'GET /clubs/getclubs?page=0': () => json(page(clubList)),
     'GET /memberships/user/5': () => json([]),
-    'GET /activities/getactivities': () => json(page([])),
+    'GET /activities/getactivities?page=0&size=100': () => json(page([])),
     ...extraHandlers,
   })
   const user = userEvent.setup()
@@ -252,7 +252,7 @@ describe('App integration (mocked backend)', () => {
   it('REQ-007: activities list shows correct Activity ID / Club ID and survives a null club', async () => {
     const { user } = await loginAs('Leader', {
       'GET /memberships/user/2': () => json([]),
-      'GET /activities/getactivities': () =>
+      'GET /activities/getactivities?page=0&size=100': () =>
         json(
           page([
             { id: 11, title: 'Opening Match', description: 'First game', club: { id: 42, name: 'Chess Club' } },
@@ -280,7 +280,7 @@ describe('App integration (mocked backend)', () => {
     await user.type(screen.getByPlaceholderText('Description'), 'Finals')
     await user.click(screen.getByRole('button', { name: 'Create Activity' }))
     const post = calls.find((c) => c.method === 'POST' && c.path === '/activities')
-    expect(post.body).toEqual({ title: 'Tournament', description: 'Finals', club: { id: '1' } })
+    expect(post.body).toEqual({ title: 'Tournament', description: 'Finals', club: { id: 1 } })
     expect(await screen.findByText('Activity created: Tournament (Club ID: 1)')).toBeInTheDocument()
   })
 
