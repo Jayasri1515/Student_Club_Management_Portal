@@ -33,6 +33,11 @@ export class ApiError extends Error {
     }
 }
 
+/** True when the error means the caller cancelled the request (not a timeout or HTTP error). */
+export function isAbortError(error) {
+    return error instanceof ApiError && error.code === 'aborted';
+}
+
 export function buildUrl(baseUrl, path) {
     const base = String(baseUrl ?? '').replace(/\/+$/, '');
     const suffix = String(path ?? '').replace(/^\/+/, '');

@@ -488,3 +488,17 @@ body {
 
 .field-error { color: #c53030; margin: 0; }
 .activity-ids { font-family: monospace; font-size: 0.85em; color: #4a5568; }
+
+.auth-notice {
+    background: #fffbeb;
+    border: 1px solid #f6ad55;
+    color: #744210;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0 auto 1rem;
+    max-width: 48rem;
+    font-size: 0.875rem;
+    text-align: left;
+}
+.auth-notice-inline { margin: 0 0 0.75rem; max-width: none; }
+.filter-note { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0 0 0.75rem; }

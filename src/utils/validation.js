@@ -5,6 +5,33 @@
 export const ACTIVITY_TEXT_MAX = 255;
 
 /**
+ * Validate the "Create Club" form. The name is required; the description is optional.
+ * Same 255 character limit as activities (Club.name / description are plain String columns).
+ * Returns { valid, errors, values } with trimmed values ({ name, description }).
+ */
+export function validateClub({ name, description } = {}) {
+    const errors = {};
+    const cleanName = String(name ?? '').trim();
+    const cleanDescription = String(description ?? '').trim();
+
+    if (!cleanName) {
+        errors.name = 'Club name is required.';
+    } else if (cleanName.length > ACTIVITY_TEXT_MAX) {
+        errors.name = `Club name must be ${ACTIVITY_TEXT_MAX} characters or fewer.`;
+    }
+
+    if (cleanDescription.length > ACTIVITY_TEXT_MAX) {
+        errors.description = `Description must be ${ACTIVITY_TEXT_MAX} characters or fewer.`;
+    }
+
+    return {
+        valid: Object.keys(errors).length === 0,
+        errors,
+        values: { name: cleanName, description: cleanDescription },
+    };
+}
+
+/**
  * Validate raw form values.
  * Returns { valid, errors, values } where `values` holds the cleaned payload
  * ({ clubId: number, title, description }) and `errors` maps field -> message.

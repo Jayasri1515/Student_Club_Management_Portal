@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { apiClient } from './services/apiClient.js';
+import { apiClient, isAbortError } from './services/apiClient.js';
 import {
     canCreateClub,
     canUpdateClub,
@@ -16,7 +16,9 @@ import ActivityItem from './components/ActivityItem.jsx';
 import ClubBrowser from './components/ClubBrowser.jsx';
 import ActivityForm from './components/ActivityForm.jsx';
 import Modal from './components/Modal.jsx';
+import DevAuthNotice from './components/DevAuthNotice.jsx';
 import { normalizeId, sameId } from './utils/ids.js';
+import { validateClub } from './utils/validation.js';
 import { normalizePage, mergeById, fetchAllPages } from './utils/pagination.js';
 
 // The backend base URL now lives in src/config/apiConfig.js (VITE_API_BASE_URL, REQ-001)
@@ -28,6 +30,7 @@ import { normalizePage, mergeById, fetchAllPages } from './utils/pagination.js';
 // typed credentials are not lost accidentally (same as before).
 const LoginPopup = ({ setShowLoginPopup, handleLogin, loginDetails, setLoginDetails, setShowRegisterPopup }) => (
     <Modal title={<>Login &#128274;</>} onClose={() => setShowLoginPopup(false)} closeOnBackdrop={false}>
+        <DevAuthNotice variant="inline" />
         <form onSubmit={handleLogin} className="form-container">
             <input
                 type="text"
@@ -67,6 +70,7 @@ const LoginPopup = ({ setShowLoginPopup, handleLogin, loginDetails, setLoginDeta
 // --- Register Pop-up Component (Moved outside of App) ---
 const RegisterPopup = ({ setShowRegisterPopup, handleRegister, registerDetails, setRegisterDetails, setShowLoginPopup, humanVerification, setHumanVerification }) => (
     <Modal title={<>Register &#128527;</>} onClose={() => setShowRegisterPopup(false)} closeOnBackdrop={false}>
+        <DevAuthNotice variant="inline" />
         <form onSubmit={handleRegister} className="form-container">
             <input
                 type="text"
@@ -180,17 +184,37 @@ function App() {
     const loadingMoreClubsRef = useRef(false);
     const clubsRequestRef = useRef(0);
     const activitiesRequestRef = useRef(0);
+    const membershipsRequestRef = useRef(0);
+    // Abort scopes. `lifetimeRef` is aborted when App unmounts (cancels in-flight writes);
+    // `pageScopeRef` is aborted whenever the page, user or activity filter changes (cancels
+    // in-flight list loads). Both are re-created, so React StrictMode remounting works.
+    const lifetimeRef = useRef(new AbortController());
+    const pageScopeRef = useRef(new AbortController());
+    const lifeOptions = () => ({ signal: lifetimeRef.current.signal });
+    // null = all activities, otherwise only this club's activities ("View Activities").
+    const [activityClubId, setActivityClubId] = useState(null);
+    const [clubErrors, setClubErrors] = useState({});
+    const [creatingClub, setCreatingClub] = useState(false);
+    const creatingClubRef = useRef(false);
 
     /**
      * This useEffect hook is the central point for fetching data.
      * It runs whenever `currentPage` or `loggedInUser` changes.
      */
     useEffect(() => {
+        if (lifetimeRef.current.signal.aborted) lifetimeRef.current = new AbortController();
+        return () => lifetimeRef.current.abort();
+    }, []);
+
+    useEffect(() => {
+        // A new scope per page/user/filter; leaving the page aborts its in-flight list loads.
+        const scope = new AbortController();
+        pageScopeRef.current = scope;
         if (loggedInUser) {
             if (currentPage === 'clubs') {
                 fetchClubs();
             } else if (currentPage === 'activities') {
-                fetchAllActivities();
+                showActivities();
             } else if (currentPage === 'memberships') {
                 fetchMemberships(loggedInUser.id);
             } else if (currentPage === 'join') {
@@ -198,8 +222,9 @@ function App() {
                 fetchMemberships(loggedInUser.id);
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on page/user only (as before)
-    }, [currentPage, loggedInUser]);
+        return () => scope.abort();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on page/user/filter only
+    }, [currentPage, loggedInUser, activityClubId]);
 
     // --- API Call functions ---
     // CR-003: GET /clubs/getclubs returns a Spring Page (default size 10). The response
@@ -213,7 +238,7 @@ function App() {
         }
         const requestId = ++clubsRequestRef.current;
         try {
-            const data = await apiClient.get(`/clubs/getclubs?page=${page}`);
+            const data = await apiClient.get(`/clubs/getclubs?page=${page}`, { signal: pageScopeRef.current.signal });
             if (requestId !== clubsRequestRef.current) return;
             const result = normalizePage(data);
             if (!result.valid) {
@@ -223,6 +248,7 @@ function App() {
             setClubs((previous) => (page === 0 ? result.content : mergeById(previous, result.content)));
             setClubsPaging({ nextPage: page + 1, hasMore: result.hasMore === true });
         } catch (error) {
+            if (isAbortError(error)) return;
             if (requestId === clubsRequestRef.current) notifyError(`Error fetching clubs: ${error.message}`);
         } finally {
             if (page > 0) {
@@ -234,12 +260,13 @@ function App() {
 
     // CR-002: both activity endpoints are paged (GET ...?page=&size=). Fetch every page so
     // the list never silently omits records; tell the user if the safety limit is hit.
-    // Returns the activities, or null if the request failed or was superseded.
+    // Returns the activities, or null if the request failed, was cancelled or was superseded.
     const loadAllActivities = async (basePath, failureLabel) => {
         const requestId = ++activitiesRequestRef.current;
+        const signal = pageScopeRef.current.signal;
         try {
             const { items, truncated } = await fetchAllPages(
-                (page) => apiClient.get(`${basePath}?page=${page}&size=${ACTIVITY_PAGE_SIZE}`),
+                (page) => apiClient.get(`${basePath}?page=${page}&size=${ACTIVITY_PAGE_SIZE}`, { signal }),
                 { size: ACTIVITY_PAGE_SIZE },
             );
             if (requestId !== activitiesRequestRef.current) return null;
@@ -249,26 +276,72 @@ function App() {
             }
             return items;
         } catch (error) {
+            if (isAbortError(error)) return null;
             if (requestId === activitiesRequestRef.current) notifyError(`${failureLabel}: ${error.message}`);
             return null;
         }
     };
 
-    const fetchAllActivities = () => loadAllActivities('/activities/getactivities', 'Error fetching all activities');
+    // The activities list is either every activity or a single club (activityClubId, set by
+    // "View Activities"). The page effect and every refresh go through here, so the club
+    // filter is never overwritten by an unfiltered reload.
+    const loadActivities = () => {
+        if (normalizeId(activityClubId) === null) {
+            return loadAllActivities('/activities/getactivities', 'Error fetching all activities');
+        }
+        return loadAllActivities(`/activities/club/${activityClubId}`, 'Error fetching activities');
+    };
 
-    const fetchActivitiesForClub = async (clubId) => {
-        const items = await loadAllActivities(`/activities/club/${clubId}`, 'Error fetching activities');
-        if (items === null) return;
-        info(`Showing activities for club ${clubId}.`);
+    const showActivities = async () => {
+        const items = await loadActivities();
+        if (items !== null && normalizeId(activityClubId) !== null) info(`Showing activities for club ${activityClubId}.`);
+    };
+
+    const viewClubActivities = (clubId) => {
+        setActivityClubId(clubId);
         setCurrentPage('activities');
     };
 
+    const viewAllActivities = () => {
+        setActivityClubId(null);
+        setCurrentPage('activities');
+    };
+
+    const logout = (message = 'Logged out.') => {
+        setLoggedInUser(null);
+        setCurrentPage('dashboard');
+        setActivityClubId(null);
+        setClubs([]);
+        setActivities([]);
+        setMemberships([]);
+        info(message);
+    };
+
+    // Any failure clears the list so a stale one (for example from before an error) is never
+    // shown as current. 401 ends the session; the latest request wins.
     const fetchMemberships = async (userId) => {
+        const requestId = ++membershipsRequestRef.current;
         try {
-            const data = await apiClient.get(`/memberships/user/${userId}`);
-            setMemberships(Array.isArray(data) ? data : []);
+            const data = await apiClient.get(`/memberships/user/${userId}`, { signal: pageScopeRef.current.signal });
+            if (requestId !== membershipsRequestRef.current) return;
+            if (!Array.isArray(data)) {
+                setMemberships([]);
+                notifyError('Error fetching memberships: unexpected response from the server.');
+                return;
+            }
+            setMemberships(data);
         } catch (error) {
-            notifyError(`Error fetching memberships: ${error.message}`);
+            if (isAbortError(error) || requestId !== membershipsRequestRef.current) return;
+            setMemberships([]);
+            if (error.status === 401) {
+                logout('Your session is no longer valid. Please log in again.');
+            } else if (error.status === 403) {
+                notifyError('Error fetching memberships: you are not allowed to view this list.');
+            } else if (error.status === 404) {
+                notifyError('Error fetching memberships: your account was not found. Please log in again.');
+            } else {
+                notifyError(`Error fetching memberships: ${error.message}`);
+            }
         }
     };
 
@@ -276,12 +349,13 @@ function App() {
         e.preventDefault();
         try {
             // The backend returns the User entity (no token) - see apiClient.js.
-            const user = await apiClient.post('/auth/login', loginDetails);
+            const user = await apiClient.post('/auth/login', loginDetails, lifeOptions());
             setLoggedInUser(user);
             success(`Login successful! Welcome, ${user.username}.`);
             setShowLoginPopup(false);
             setCurrentPage('dashboard');
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Login failed: ${error.message}`);
             setLoggedInUser(null);
         }
@@ -297,7 +371,7 @@ function App() {
         }
 
         try {
-            const result = await apiClient.post('/auth/register', registerDetails);
+            const result = await apiClient.post('/auth/register', registerDetails, lifeOptions());
             // The backend answers HTTP 200 with a plain-text message (instead of a user)
             // when the username is already taken.
             if (typeof result === 'string') {
@@ -309,21 +383,48 @@ function App() {
             setShowRegisterPopup(false);
             setShowLoginPopup(true);
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Registration failed: ${error.message}`);
         }
     };
 
+    const updateNewClub = (field) => (e) => {
+        const { value } = e.target;
+        setNewClub((previous) => ({ ...previous, [field]: value }));
+        setClubErrors((previous) => {
+            if (!previous[field]) return previous;
+            const next = { ...previous };
+            delete next[field];
+            return next;
+        });
+    };
+
+    // Validates before anything is sent (name required, 255 character limits) and ignores
+    // repeated submits while a request is pending.
     const handleCreateClub = async (e) => {
         e.preventDefault();
-        if (!canCreateClub(loggedInUser)) return;
+        if (!canCreateClub(loggedInUser) || creatingClubRef.current) return;
+        const result = validateClub(newClub);
+        if (!result.valid) {
+            setClubErrors(result.errors);
+            document.getElementById(result.errors.name ? 'create-club-name' : 'create-club-description')?.focus();
+            return;
+        }
+        setClubErrors({});
+        creatingClubRef.current = true;
+        setCreatingClub(true);
         try {
-            const clubData = { ...newClub, leaderId: loggedInUser.id };
-            const data = await apiClient.post('/clubs', clubData);
+            const clubData = { ...result.values, leaderId: loggedInUser.id };
+            const data = await apiClient.post('/clubs', clubData, lifeOptions());
             success(`Club created: ${data.name} (ID: ${data.id})`);
             setNewClub({ name: '', description: '' });
             fetchClubs();
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Create Club Error: ${error.message}`);
+        } finally {
+            creatingClubRef.current = false;
+            setCreatingClub(false);
         }
     };
 
@@ -337,11 +438,12 @@ function App() {
                 name: newName,
                 description: club.description ?? null,
                 leader: club.leader ?? null,
-            });
+            }, lifeOptions());
             success(`Club updated to: ${data.name}`);
             setRenameTarget(null);
             fetchClubs();
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Update Club Error: ${error.message}`);
         } finally {
             setRenaming(false);
@@ -352,10 +454,11 @@ function App() {
         setDeleteTarget(null);
         if (!canDeleteClub(loggedInUser, club)) return;
         try {
-            await apiClient.delete(`/clubs/${club.id}`);
+            await apiClient.delete(`/clubs/${club.id}`, lifeOptions());
             success('Club deleted successfully.');
             fetchClubs();
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Delete Club Error: ${error.message}`);
         }
     };
@@ -371,11 +474,12 @@ function App() {
                 description: values.description,
                 club: { id: values.clubId }
             };
-            const data = await apiClient.post('/activities', activityData);
+            const data = await apiClient.post('/activities', activityData, lifeOptions());
             success(`Activity created: ${data?.title ?? values.title} (Club ID: ${data?.club?.id ?? values.clubId})`);
-            fetchAllActivities();
+            loadActivities();
             return true;
         } catch (error) {
+            if (isAbortError(error)) return false;
             notifyError(`Create Activity Error: ${error.message}`);
             return false;
         }
@@ -406,10 +510,11 @@ function App() {
                 user: { id: loggedInUser.id },
                 club: { id: club.id }
             };
-            const data = await apiClient.post('/memberships/join', membershipData);
+            const data = await apiClient.post('/memberships/join', membershipData, lifeOptions());
             success(`Successfully joined ${data?.club?.name ?? club.name}.`);
             fetchMemberships(loggedInUser.id);
         } catch (error) {
+            if (isAbortError(error)) return;
             notifyError(`Failed to join club: ${error.message}`);
         } finally {
             joiningRef.current.delete(clubKey);
@@ -446,7 +551,7 @@ function App() {
                                 <button onClick={() => setCurrentPage('clubs')} className="button-large">
                                     Go to Club Management
                                 </button>
-                                <button onClick={() => setCurrentPage('activities')} className="button-large">
+                                <button onClick={viewAllActivities} className="button-large">
                                     Go to Activity Management
                                 </button>
                                 <button onClick={() => setCurrentPage('join')} className="button-large">
@@ -456,14 +561,7 @@ function App() {
                                     View My Memberships
                                 </button>
                             </div>
-                            <button onClick={() => {
-                                setLoggedInUser(null);
-                                setCurrentPage('dashboard');
-                                setClubs([]);
-                                setActivities([]);
-                                setMemberships([]);
-                                info('Logged out.');
-                            }} className="button-large logout-button">
+                            <button onClick={() => logout()} className="button-large logout-button">
                                 Logout
                             </button>
                         </div>
@@ -482,25 +580,36 @@ function App() {
 
                         <div className="section-container">
                             <h3 className="section-title">Create a Club</h3>
-                            <form onSubmit={handleCreateClub} className="form-container">
-                                <input 
-                                    type="text" 
-                                    placeholder="Club Name" 
-                                    value={newClub.name} 
-                                    onChange={e => setNewClub({ ...newClub, name: e.target.value })} 
+                            <form onSubmit={handleCreateClub} className="form-container" noValidate>
+                                <input
+                                    id="create-club-name"
+                                    type="text"
+                                    placeholder="Club Name"
+                                    aria-label="Club name"
+                                    aria-required="true"
+                                    aria-invalid={clubErrors.name ? 'true' : 'false'}
+                                    aria-describedby={clubErrors.name ? 'create-club-name-error' : undefined}
+                                    value={newClub.name}
+                                    onChange={updateNewClub('name')}
                                     className="form-input"
                                 />
-                                <input 
-                                    type="text" 
-                                    placeholder="Description" 
-                                    value={newClub.description} 
-                                    onChange={e => setNewClub({ ...newClub, description: e.target.value })} 
+                                {clubErrors.name && <p id="create-club-name-error" role="alert" className="field-error">{clubErrors.name}</p>}
+                                <input
+                                    id="create-club-description"
+                                    type="text"
+                                    placeholder="Description"
+                                    aria-label="Club description"
+                                    aria-invalid={clubErrors.description ? 'true' : 'false'}
+                                    aria-describedby={clubErrors.description ? 'create-club-description-error' : undefined}
+                                    value={newClub.description}
+                                    onChange={updateNewClub('description')}
                                     className="form-input"
                                 />
+                                {clubErrors.description && <p id="create-club-description-error" role="alert" className="field-error">{clubErrors.description}</p>}
                                 <button
                                     type="submit"
                                     className="button primary"
-                                    disabled={!canCreateClub(loggedInUser)}
+                                    disabled={!canCreateClub(loggedInUser) || creatingClub}
                                     title={canCreateClub(loggedInUser) ? undefined : 'Only Admins can create clubs'}
                                 >
                                     Create Club
@@ -519,7 +628,7 @@ function App() {
                                                 {club.description && <span className="description-text"> - {club.description}</span>}
                                             </span>
                                             <div className="list-item-buttons">
-                                                <button onClick={() => fetchActivitiesForClub(club.id)} className="button list-update">View Activities</button>
+                                                <button onClick={() => viewClubActivities(club.id)} className="button list-update">View Activities</button>
                                                 <button
                                                     onClick={() => setRenameTarget(club)}
                                                     className="button list-update"
@@ -568,6 +677,14 @@ function App() {
 
                         <div className="section-container">
                             <h3 className="section-title">Activities List</h3>
+                            {normalizeId(activityClubId) !== null && (
+                                <p className="filter-note">
+                                    <span>Filtered to club ID {activityClubId}.</span>
+                                    <button type="button" className="button secondary" onClick={viewAllActivities}>
+                                        Show all activities
+                                    </button>
+                                </p>
+                            )}
                             <ul className="list-group">
                                 {activities.length > 0 ? (
                                     activities.map((activity, index) => (
@@ -639,6 +756,7 @@ function App() {
     return (
         <div className="min-h-screen container-wrapper">
             <h1 className="main-title">Club Management System</h1>
+            {loggedInUser && <DevAuthNotice />}
             <div className="card-container">
                 {renderPage()}
             </div>
