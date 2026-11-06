@@ -1,129 +1,149 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
+import { apiClient, isAbortError } from './services/apiClient.js';
+import {
+    canCreateClub,
+    canUpdateClub,
+    canDeleteClub,
+    canCreateActivity,
+    canJoinClub,
+} from './utils/permissions.js';
+import { useNotifications } from './hooks/useNotifications.js';
+import NotificationContainer from './components/Notification.jsx';
+import RenameClubModal from './components/RenameClubModal.jsx';
+import ConfirmDialog from './components/ConfirmDialog.jsx';
+import ActivityItem from './components/ActivityItem.jsx';
+import ClubBrowser from './components/ClubBrowser.jsx';
+import ActivityForm from './components/ActivityForm.jsx';
+import Modal from './components/Modal.jsx';
+import DevAuthNotice from './components/DevAuthNotice.jsx';
+import { normalizeId, sameId } from './utils/ids.js';
+import { validateClub } from './utils/validation.js';
+import { normalizePage, mergeById, fetchAllPages } from './utils/pagination.js';
 
-// The base URL for your Spring Boot backend
-const API_BASE_URL = 'http://localhost:8082/api';
+// The backend base URL now lives in src/config/apiConfig.js (VITE_API_BASE_URL, REQ-001)
+// and all HTTP calls go through src/services/apiClient.js (REQ-004).
 
 // --- Login Pop-up Component (Moved outside of App) ---
-const LoginPopup = ({ showLoginPopup, setShowLoginPopup, handleLogin, loginDetails, setLoginDetails, setShowRegisterPopup }) => (
-    <div className={`popup-backdrop ${showLoginPopup ? 'slide-in' : ''}`}>
-        <div className="popup-content">
-            <div className="card card-sm">
-                <div className="header-with-button">
-                    <h2 className="card-title">Login &#128274;</h2>
-                    <button onClick={() => setShowLoginPopup(false)} className="modal-close-button">&times;</button>
-                </div>
-                <form onSubmit={handleLogin} className="form-container">
-                    <input 
-                        type="text" 
-                        placeholder="Username" 
-                        value={loginDetails.username} 
-                        onChange={e => setLoginDetails({ ...loginDetails, username: e.target.value })} 
-                        className="form-input"
-                    />
-                    <input 
-                        type="password" 
-                        placeholder="Password" 
-                        value={loginDetails.password} 
-                        onChange={e => setLoginDetails({ ...loginDetails, password: e.target.value })} 
-                        className="form-input"
-                    />
-                    <div className="button-group">
-                        <button 
-                            type="submit" 
-                            className="button primary"
-                        >
-                            Login
-                        </button>
-                        <button 
-                            type="button" 
-                            onClick={() => { setShowLoginPopup(false); setShowRegisterPopup(true); }}
-                            className="button secondary"
-                        >
-                            Go to Register
-                        </button>
-                    </div>
-                </form>
+// CR-006: rendered through the shared accessible Modal (role=dialog, focus
+// management, Escape, labelled title). A backdrop click does not close it, so
+// typed credentials are not lost accidentally (same as before).
+const LoginPopup = ({ setShowLoginPopup, handleLogin, loginDetails, setLoginDetails, setShowRegisterPopup }) => (
+    <Modal title={<>Login &#128274;</>} onClose={() => setShowLoginPopup(false)} closeOnBackdrop={false}>
+        <DevAuthNotice variant="inline" />
+        <form onSubmit={handleLogin} className="form-container">
+            <input
+                type="text"
+                placeholder="Username"
+                aria-label="Username"
+                value={loginDetails.username}
+                onChange={e => setLoginDetails({ ...loginDetails, username: e.target.value })}
+                className="form-input"
+            />
+            <input
+                type="password"
+                placeholder="Password"
+                aria-label="Password"
+                value={loginDetails.password}
+                onChange={e => setLoginDetails({ ...loginDetails, password: e.target.value })}
+                className="form-input"
+            />
+            <div className="button-group">
+                <button
+                    type="submit"
+                    className="button primary"
+                >
+                    Login
+                </button>
+                <button
+                    type="button"
+                    onClick={() => { setShowLoginPopup(false); setShowRegisterPopup(true); }}
+                    className="button secondary"
+                >
+                    Go to Register
+                </button>
             </div>
-        </div>
-    </div>
+        </form>
+    </Modal>
 );
 
 // --- Register Pop-up Component (Moved outside of App) ---
-const RegisterPopup = ({ showRegisterPopup, setShowRegisterPopup, handleRegister, registerDetails, setRegisterDetails, setShowLoginPopup, humanVerification, setHumanVerification }) => (
-    <div className={`popup-backdrop ${showRegisterPopup ? 'slide-in' : ''}`}>
-        <div className="popup-content">
-            <div className="card card-sm">
-                <div className="header-with-button">
-                    <h2 className="card-title">Register &#128527;</h2>
-                    <button onClick={() => setShowRegisterPopup(false)} className="modal-close-button">&times;</button>
-                </div>
-                <form onSubmit={handleRegister} className="form-container">
-                    <input 
-                        type="text" 
-                        placeholder="Username" 
-                        value={registerDetails.username} 
-                        onChange={e => setRegisterDetails({ ...registerDetails, username: e.target.value })} 
-                        className="form-input"
-                    />
-                    <input 
-                        type="password" 
-                        placeholder="Password" 
-                        value={registerDetails.password} 
-                        onChange={e => setRegisterDetails({ ...registerDetails, password: e.target.value })} 
-                        className="form-input"
-                    />
-                    <input 
-                        type="email" 
-                        placeholder="Email" 
-                        value={registerDetails.email} 
-                        onChange={e => setRegisterDetails({ ...registerDetails, email: e.target.value })} 
-                        className="form-input"
-                    />
-                    <select
-                        value={registerDetails.role}
-                        onChange={e => setRegisterDetails({ ...registerDetails, role: e.target.value })}
-                        className="form-input"
-                    >
-                        <option value="Student">Student</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Leader">Leader</option>
-                    </select>
+const RegisterPopup = ({ setShowRegisterPopup, handleRegister, registerDetails, setRegisterDetails, setShowLoginPopup, humanVerification, setHumanVerification }) => (
+    <Modal title={<>Register &#128527;</>} onClose={() => setShowRegisterPopup(false)} closeOnBackdrop={false}>
+        <DevAuthNotice variant="inline" />
+        <form onSubmit={handleRegister} className="form-container">
+            <input
+                type="text"
+                placeholder="Username"
+                aria-label="Username"
+                value={registerDetails.username}
+                onChange={e => setRegisterDetails({ ...registerDetails, username: e.target.value })}
+                className="form-input"
+            />
+            <input
+                type="password"
+                placeholder="Password"
+                aria-label="Password"
+                value={registerDetails.password}
+                onChange={e => setRegisterDetails({ ...registerDetails, password: e.target.value })}
+                className="form-input"
+            />
+            <input
+                type="email"
+                placeholder="Email"
+                aria-label="Email"
+                value={registerDetails.email}
+                onChange={e => setRegisterDetails({ ...registerDetails, email: e.target.value })}
+                className="form-input"
+            />
+            <select
+                aria-label="Role"
+                value={registerDetails.role}
+                onChange={e => setRegisterDetails({ ...registerDetails, role: e.target.value })}
+                className="form-input"
+            >
+                <option value="Student">Student</option>
+                <option value="Admin">Admin</option>
+                <option value="Leader">Leader</option>
+            </select>
 
-                    {/* Fun Human Verification Field */}
-                    <div className="human-verification-container">
-                        <h4>Verify you are human  &#128520;</h4>
-                        <label className="verification-label">I have an eye but cannot see. What am I?</label>
-                        <input
-                            type="text"
-                            placeholder="Your Answer"
-                            value={humanVerification}
-                            onChange={e => setHumanVerification(e.target.value)}
-                            className="form-input"
-                        />
-                    </div>
-                    {/* End of Fun Human Verification Field */}
-
-                    <div className="button-group">
-                        <button 
-                            type="submit" 
-                            className="button green"
-                        >
-                            Register
-                        </button>
-                        <button 
-                            type="button" 
-                            onClick={() => { setShowRegisterPopup(false); setShowLoginPopup(true); }}
-                            className="button secondary"
-                        >
-                            Back to Login
-                        </button>
-                    </div>
-                </form>
+            {/* Fun Human Verification Field */}
+            <div className="human-verification-container">
+                <h4>Verify you are human  &#128520;</h4>
+                <label htmlFor="register-human-verification" className="verification-label">I have an eye but cannot see. What am I?</label>
+                <input
+                    id="register-human-verification"
+                    type="text"
+                    placeholder="Your Answer"
+                    value={humanVerification}
+                    onChange={e => setHumanVerification(e.target.value)}
+                    className="form-input"
+                />
             </div>
-        </div>
-    </div>
+            {/* End of Fun Human Verification Field */}
+
+            <div className="button-group">
+                <button
+                    type="submit"
+                    className="button green"
+                >
+                    Register
+                </button>
+                <button
+                    type="button"
+                    onClick={() => { setShowRegisterPopup(false); setShowLoginPopup(true); }}
+                    className="button secondary"
+                >
+                    Back to Login
+                </button>
+            </div>
+        </form>
+    </Modal>
 );
+
+// Activities are loaded completely (all pages). A larger page size keeps the number of
+// requests low; the backend accepts `size` on both activity list endpoints.
+const ACTIVITY_PAGE_SIZE = 100;
 
 // --- Main App Component ---
 function App() {
@@ -144,101 +164,200 @@ function App() {
 
     // State to manage data from the backend
     const [clubs, setClubs] = useState([]);
+    const [clubsPaging, setClubsPaging] = useState({ nextPage: 1, hasMore: false });
     const [activities, setActivities] = useState([]);
     const [memberships, setMemberships] = useState([]);
 
     // State for forms
     const [newClub, setNewClub] = useState({ name: '', description: '' });
-    const [newActivity, setNewActivity] = useState({ clubId: '', name: '', description: '' });
-    const [joinClubId, setJoinClubId] = useState('');
+
+    // State for in-app dialogs / feedback (REQ-002, REQ-005)
+    const { notifications, dismiss, success, error: notifyError, info } = useNotifications();
+    const [renameTarget, setRenameTarget] = useState(null);
+    const [renaming, setRenaming] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [joiningClubIds, setJoiningClubIds] = useState([]);
+    const [loadingMoreClubs, setLoadingMoreClubs] = useState(false);
+    // Synchronous guards (state updates are asynchronous, so a fast double click could
+    // otherwise start two requests).
+    const joiningRef = useRef(new Set());
+    const loadingMoreClubsRef = useRef(false);
+    const clubsRequestRef = useRef(0);
+    const activitiesRequestRef = useRef(0);
+    const membershipsRequestRef = useRef(0);
+    // Abort scopes. `lifetimeRef` is aborted when App unmounts (cancels in-flight writes);
+    // `pageScopeRef` is aborted whenever the page, user or activity filter changes (cancels
+    // in-flight list loads). Both are re-created, so React StrictMode remounting works.
+    const lifetimeRef = useRef(new AbortController());
+    const pageScopeRef = useRef(new AbortController());
+    const lifeOptions = () => ({ signal: lifetimeRef.current.signal });
+    // null = all activities, otherwise only this club's activities ("View Activities").
+    const [activityClubId, setActivityClubId] = useState(null);
+    const [clubErrors, setClubErrors] = useState({});
+    const [creatingClub, setCreatingClub] = useState(false);
+    const creatingClubRef = useRef(false);
 
     /**
      * This useEffect hook is the central point for fetching data.
      * It runs whenever `currentPage` or `loggedInUser` changes.
      */
     useEffect(() => {
+        if (lifetimeRef.current.signal.aborted) lifetimeRef.current = new AbortController();
+        return () => lifetimeRef.current.abort();
+    }, []);
+
+    useEffect(() => {
+        // A new scope per page/user/filter; leaving the page aborts its in-flight list loads.
+        const scope = new AbortController();
+        pageScopeRef.current = scope;
         if (loggedInUser) {
             if (currentPage === 'clubs') {
                 fetchClubs();
             } else if (currentPage === 'activities') {
-                fetchAllActivities();
+                showActivities();
             } else if (currentPage === 'memberships') {
+                fetchMemberships(loggedInUser.id);
+            } else if (currentPage === 'join') {
+                fetchClubs();
                 fetchMemberships(loggedInUser.id);
             }
         }
-    }, [currentPage, loggedInUser]);
+        return () => scope.abort();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on page/user/filter only
+    }, [currentPage, loggedInUser, activityClubId]);
 
     // --- API Call functions ---
-    const fetchClubs = async () => {
+    // CR-003: GET /clubs/getclubs returns a Spring Page (default size 10). The response
+    // is validated, appended pages are de-duplicated, and a newer request wins over a
+    // stale one.
+    const fetchClubs = async (page = 0) => {
+        if (page > 0) {
+            if (loadingMoreClubsRef.current) return;
+            loadingMoreClubsRef.current = true;
+            setLoadingMoreClubs(true);
+        }
+        const requestId = ++clubsRequestRef.current;
         try {
-            const response = await fetch(`${API_BASE_URL}/clubs/getclubs`);
-            if (!response.ok) throw new Error(`Failed to fetch clubs: ${response.statusText}`);
-            const data = await response.json();
-            setClubs(data.content);
+            const data = await apiClient.get(`/clubs/getclubs?page=${page}`, { signal: pageScopeRef.current.signal });
+            if (requestId !== clubsRequestRef.current) return;
+            const result = normalizePage(data);
+            if (!result.valid) {
+                notifyError('Error fetching clubs: unexpected response from the server.');
+                return;
+            }
+            setClubs((previous) => (page === 0 ? result.content : mergeById(previous, result.content)));
+            setClubsPaging({ nextPage: page + 1, hasMore: result.hasMore === true });
         } catch (error) {
-            alert(`Error fetching clubs: ${error.message}`);
+            if (isAbortError(error)) return;
+            if (requestId === clubsRequestRef.current) notifyError(`Error fetching clubs: ${error.message}`);
+        } finally {
+            if (page > 0) {
+                loadingMoreClubsRef.current = false;
+                setLoadingMoreClubs(false);
+            }
         }
     };
 
-    const fetchAllActivities = async () => {
+    // CR-002: both activity endpoints are paged (GET ...?page=&size=). Fetch every page so
+    // the list never silently omits records; tell the user if the safety limit is hit.
+    // Returns the activities, or null if the request failed, was cancelled or was superseded.
+    const loadAllActivities = async (basePath, failureLabel) => {
+        const requestId = ++activitiesRequestRef.current;
+        const signal = pageScopeRef.current.signal;
         try {
-            const response = await fetch(`${API_BASE_URL}/activities/getactivities`);
-            if (!response.ok) throw new Error(`Failed to fetch activities: ${response.statusText}`);
-            const data = await response.json();
-            setActivities(data.content);
-            if (data.content.length === 0) {
-                alert('Successfully fetched, but no activities found.');
+            const { items, truncated } = await fetchAllPages(
+                (page) => apiClient.get(`${basePath}?page=${page}&size=${ACTIVITY_PAGE_SIZE}`, { signal }),
+                { size: ACTIVITY_PAGE_SIZE },
+            );
+            if (requestId !== activitiesRequestRef.current) return null;
+            setActivities(items);
+            if (truncated) {
+                notifyError(`Only the first ${items.length} activities are shown; there are more than can be loaded at once.`);
             }
+            return items;
         } catch (error) {
-            alert(`Error fetching all activities: ${error.message}`);
+            if (isAbortError(error)) return null;
+            if (requestId === activitiesRequestRef.current) notifyError(`${failureLabel}: ${error.message}`);
+            return null;
         }
     };
-    
-    const fetchActivitiesForClub = async (clubId) => {
-        try {
-            const response = await fetch(`${API_BASE_URL}/activities/club/${clubId}`);
-            if (!response.ok) throw new Error(`Failed to fetch activities: ${response.statusText}`);
-            const data = await response.json();
-            setActivities(data.content);
-            alert(`Activities for club ${clubId} fetched successfully.`);
-            setCurrentPage('activities'); 
-        } catch (error) {
-            alert(`Error fetching activities: ${error.message}`);
+
+    // The activities list is either every activity or a single club (activityClubId, set by
+    // "View Activities"). The page effect and every refresh go through here, so the club
+    // filter is never overwritten by an unfiltered reload.
+    const loadActivities = () => {
+        if (normalizeId(activityClubId) === null) {
+            return loadAllActivities('/activities/getactivities', 'Error fetching all activities');
         }
+        return loadAllActivities(`/activities/club/${activityClubId}`, 'Error fetching activities');
     };
-    
+
+    const showActivities = async () => {
+        const items = await loadActivities();
+        if (items !== null && normalizeId(activityClubId) !== null) info(`Showing activities for club ${activityClubId}.`);
+    };
+
+    const viewClubActivities = (clubId) => {
+        setActivityClubId(clubId);
+        setCurrentPage('activities');
+    };
+
+    const viewAllActivities = () => {
+        setActivityClubId(null);
+        setCurrentPage('activities');
+    };
+
+    const logout = (message = 'Logged out.') => {
+        setLoggedInUser(null);
+        setCurrentPage('dashboard');
+        setActivityClubId(null);
+        setClubs([]);
+        setActivities([]);
+        setMemberships([]);
+        info(message);
+    };
+
+    // Any failure clears the list so a stale one (for example from before an error) is never
+    // shown as current. 401 ends the session; the latest request wins.
     const fetchMemberships = async (userId) => {
+        const requestId = ++membershipsRequestRef.current;
         try {
-            const response = await fetch(`${API_BASE_URL}/memberships/user/${userId}`);
-            if (!response.ok) throw new Error(`Failed to fetch memberships: ${response.statusText}`);
-            const data = await response.json();
+            const data = await apiClient.get(`/memberships/user/${userId}`, { signal: pageScopeRef.current.signal });
+            if (requestId !== membershipsRequestRef.current) return;
+            if (!Array.isArray(data)) {
+                setMemberships([]);
+                notifyError('Error fetching memberships: unexpected response from the server.');
+                return;
+            }
             setMemberships(data);
         } catch (error) {
-            alert(`Error fetching memberships: ${error.message}`);
+            if (isAbortError(error) || requestId !== membershipsRequestRef.current) return;
+            setMemberships([]);
+            if (error.status === 401) {
+                logout('Your session is no longer valid. Please log in again.');
+            } else if (error.status === 403) {
+                notifyError('Error fetching memberships: you are not allowed to view this list.');
+            } else if (error.status === 404) {
+                notifyError('Error fetching memberships: your account was not found. Please log in again.');
+            } else {
+                notifyError(`Error fetching memberships: ${error.message}`);
+            }
         }
     };
 
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(loginDetails),
-            });
-            if (response.status === 200) {
-                const user = await response.json();
-                setLoggedInUser(user);
-                alert(`Login successful! Welcome, ${user.username}.`);
-                setShowLoginPopup(false);
-                setCurrentPage('dashboard');
-            } else {
-                const errorMessage = await response.text();
-                alert(`Login failed: ${errorMessage}`);
-                setLoggedInUser(null);
-            }
+            // The backend returns the User entity (no token) - see apiClient.js.
+            const user = await apiClient.post('/auth/login', loginDetails, lifeOptions());
+            setLoggedInUser(user);
+            success(`Login successful! Welcome, ${user.username}.`);
+            setShowLoginPopup(false);
+            setCurrentPage('dashboard');
         } catch (error) {
-            alert(`Login Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Login failed: ${error.message}`);
+            setLoggedInUser(null);
         }
     };
 
@@ -247,131 +366,159 @@ function App() {
         
         // Fun human verification check
         if (humanVerification.toLowerCase().trim() !== 'a needle') {
-            alert('That\'s not the answer! I think you are not a human, Try again.');
+            notifyError("That's not the answer! I think you are not a human, Try again.");
             return; 
         }
 
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(registerDetails),
-            });
-            if (response.status === 200) {
-                const user = await response.json();
-                alert(`Registration successful! You can now log in.`);
-                setRegisterDetails({ username: '', password: '', email: '', role: 'Student' });
-                setShowRegisterPopup(false);
-                setShowLoginPopup(true);
-            } else {
-                const errorMessage = await response.text();
-                alert(`Registration failed: ${errorMessage}`);
+            const result = await apiClient.post('/auth/register', registerDetails, lifeOptions());
+            // The backend answers HTTP 200 with a plain-text message (instead of a user)
+            // when the username is already taken.
+            if (typeof result === 'string') {
+                notifyError(`Registration failed: ${result}`);
+                return;
             }
+            success('Registration successful! You can now log in.');
+            setRegisterDetails({ username: '', password: '', email: '', role: 'Student' });
+            setShowRegisterPopup(false);
+            setShowLoginPopup(true);
         } catch (error) {
-            alert(`Registration Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Registration failed: ${error.message}`);
         }
     };
 
+    const updateNewClub = (field) => (e) => {
+        const { value } = e.target;
+        setNewClub((previous) => ({ ...previous, [field]: value }));
+        setClubErrors((previous) => {
+            if (!previous[field]) return previous;
+            const next = { ...previous };
+            delete next[field];
+            return next;
+        });
+    };
+
+    // Validates before anything is sent (name required, 255 character limits) and ignores
+    // repeated submits while a request is pending.
     const handleCreateClub = async (e) => {
         e.preventDefault();
+        if (!canCreateClub(loggedInUser) || creatingClubRef.current) return;
+        const result = validateClub(newClub);
+        if (!result.valid) {
+            setClubErrors(result.errors);
+            document.getElementById(result.errors.name ? 'create-club-name' : 'create-club-description')?.focus();
+            return;
+        }
+        setClubErrors({});
+        creatingClubRef.current = true;
+        setCreatingClub(true);
         try {
-            const clubData = { ...newClub, leaderId: loggedInUser.id };
-            const response = await fetch(`${API_BASE_URL}/clubs`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(clubData),
-            });
-            if (!response.ok) throw new Error(`Failed to create club: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Club created: ${data.name} (ID: ${data.id})`);
+            const clubData = { ...result.values, leaderId: loggedInUser.id };
+            const data = await apiClient.post('/clubs', clubData, lifeOptions());
+            success(`Club created: ${data.name} (ID: ${data.id})`);
             setNewClub({ name: '', description: '' });
             fetchClubs();
         } catch (error) {
-            alert(`Create Club Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Create Club Error: ${error.message}`);
+        } finally {
+            creatingClubRef.current = false;
+            setCreatingClub(false);
         }
     };
 
-    const handleUpdateClub = async (id) => {
-        const newName = prompt('Enter new club name:');
-        if (!newName) return;
+    const handleUpdateClub = async (club, newName) => {
+        if (!canUpdateClub(loggedInUser, club)) return;
+        setRenaming(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/clubs/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName }),
-            });
-            if (!response.ok) throw new Error(`Failed to update club: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Club updated to: ${data.name}`);
+            // PUT /clubs/{id} overwrites name, description AND leader with the request
+            // body, so send the existing description/leader back to avoid wiping them.
+            const data = await apiClient.put(`/clubs/${club.id}`, {
+                name: newName,
+                description: club.description ?? null,
+                leader: club.leader ?? null,
+            }, lifeOptions());
+            success(`Club updated to: ${data.name}`);
+            setRenameTarget(null);
             fetchClubs();
         } catch (error) {
-            alert(`Update Club Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Update Club Error: ${error.message}`);
+        } finally {
+            setRenaming(false);
         }
     };
 
-    const handleDeleteClub = async (id) => {
-        if (window.confirm('Are you sure you want to delete this club? This action cannot be undone.')) {
-            try {
-                const response = await fetch(`${API_BASE_URL}/clubs/${id}`, { method: 'DELETE' });
-                if (!response.ok) throw new Error(`Failed to delete club: ${response.statusText}`);
-                alert('Club deleted successfully.');
-                fetchClubs();
-            } catch (error) {
-                alert(`Delete Club Error: ${error.message}`);
-            }
-        }
-    };
-
-    const handleCreateActivity = async (e) => {
-        e.preventDefault();
+    const handleDeleteClub = async (club) => {
+        setDeleteTarget(null);
+        if (!canDeleteClub(loggedInUser, club)) return;
         try {
-            const activityData = {
-                ...newActivity,
-                club: { id: newActivity.clubId }
-            };
-            const response = await fetch(`${API_BASE_URL}/activities`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(activityData),
-            });
-            if (!response.ok) throw new Error(`Failed to create activity: ${response.statusText}`);
-            const data = await response.json();
-            alert(`Activity created: ${data.name} (Club ID: ${data.club.id})`);
-            setNewActivity({ clubId: '', name: '', description: '' });
-            fetchAllActivities();
+            await apiClient.delete(`/clubs/${club.id}`, lifeOptions());
+            success('Club deleted successfully.');
+            fetchClubs();
         } catch (error) {
-            alert(`Create Activity Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Delete Club Error: ${error.message}`);
         }
     };
-    
-    const handleJoinClub = async (e) => {
-        e.preventDefault();
+
+    // CR-004: ActivityForm validates the input; this receives clean values and resolves
+    // true on success (so the form can reset) or false on failure (input is kept).
+    const handleCreateActivity = async (values) => {
+        if (!canCreateActivity(loggedInUser)) return false;
         try {
-            if (!loggedInUser) {
-                alert('Please log in first to join a club.');
-                return;
-            }
-            
+            // Backend Activity fields are { title, description, date, club }.
+            const activityData = {
+                title: values.title,
+                description: values.description,
+                club: { id: values.clubId }
+            };
+            const data = await apiClient.post('/activities', activityData, lifeOptions());
+            success(`Activity created: ${data?.title ?? values.title} (Club ID: ${data?.club?.id ?? values.clubId})`);
+            loadActivities();
+            return true;
+        } catch (error) {
+            if (isAbortError(error)) return false;
+            notifyError(`Create Activity Error: ${error.message}`);
+            return false;
+        }
+    };
+
+    // CR-001: club IDs are compared in normalized form (number vs string), and a ref guards
+    // against duplicate requests for the same club (double click / Enter key repeat).
+    const handleJoinClub = async (club) => {
+        if (!canJoinClub(loggedInUser)) {
+            notifyError('Please log in first to join a club.');
+            return;
+        }
+        const clubKey = normalizeId(club?.id);
+        if (clubKey === null) {
+            notifyError('This club cannot be joined because it has no ID.');
+            return;
+        }
+        if (joiningRef.current.has(clubKey)) return;
+        if (memberships.some((membership) => sameId(membership?.club?.id, clubKey))) {
+            info(`You have already joined ${club.name}.`);
+            return;
+        }
+        joiningRef.current.add(clubKey);
+        setJoiningClubIds(Array.from(joiningRef.current));
+        try {
+            // Existing join endpoint and payload shape.
             const membershipData = {
                 user: { id: loggedInUser.id },
-                club: { id: joinClubId }
+                club: { id: club.id }
             };
-
-            const response = await fetch(`${API_BASE_URL}/memberships/join`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(membershipData),
-            });
-            if (response.ok) {
-                const data = await response.json();
-                alert(`Successfully joined club ${data.club.id}.`);
-                setJoinClubId('');
-            } else {
-                const errorMessage = await response.text();
-                alert(`Failed to join club: ${errorMessage}`);
-            }
+            const data = await apiClient.post('/memberships/join', membershipData, lifeOptions());
+            success(`Successfully joined ${data?.club?.name ?? club.name}.`);
+            fetchMemberships(loggedInUser.id);
         } catch (error) {
-            alert(`Join Club Error: ${error.message}`);
+            if (isAbortError(error)) return;
+            notifyError(`Failed to join club: ${error.message}`);
+        } finally {
+            joiningRef.current.delete(clubKey);
+            setJoiningClubIds(Array.from(joiningRef.current));
         }
     };
 
@@ -404,7 +551,7 @@ function App() {
                                 <button onClick={() => setCurrentPage('clubs')} className="button-large">
                                     Go to Club Management
                                 </button>
-                                <button onClick={() => setCurrentPage('activities')} className="button-large">
+                                <button onClick={viewAllActivities} className="button-large">
                                     Go to Activity Management
                                 </button>
                                 <button onClick={() => setCurrentPage('join')} className="button-large">
@@ -414,14 +561,7 @@ function App() {
                                     View My Memberships
                                 </button>
                             </div>
-                            <button onClick={() => {
-                                setLoggedInUser(null);
-                                setCurrentPage('dashboard');
-                                setClubs([]);
-                                setActivities([]);
-                                setMemberships([]);
-                                alert('Logged out.');
-                            }} className="button-large logout-button">
+                            <button onClick={() => logout()} className="button-large logout-button">
                                 Logout
                             </button>
                         </div>
@@ -440,25 +580,37 @@ function App() {
 
                         <div className="section-container">
                             <h3 className="section-title">Create a Club</h3>
-                            <form onSubmit={handleCreateClub} className="form-container">
-                                <input 
-                                    type="text" 
-                                    placeholder="Club Name" 
-                                    value={newClub.name} 
-                                    onChange={e => setNewClub({ ...newClub, name: e.target.value })} 
+                            <form onSubmit={handleCreateClub} className="form-container" noValidate>
+                                <input
+                                    id="create-club-name"
+                                    type="text"
+                                    placeholder="Club Name"
+                                    aria-label="Club name"
+                                    aria-required="true"
+                                    aria-invalid={clubErrors.name ? 'true' : 'false'}
+                                    aria-describedby={clubErrors.name ? 'create-club-name-error' : undefined}
+                                    value={newClub.name}
+                                    onChange={updateNewClub('name')}
                                     className="form-input"
                                 />
-                                <input 
-                                    type="text" 
-                                    placeholder="Description" 
-                                    value={newClub.description} 
-                                    onChange={e => setNewClub({ ...newClub, description: e.target.value })} 
+                                {clubErrors.name && <p id="create-club-name-error" role="alert" className="field-error">{clubErrors.name}</p>}
+                                <input
+                                    id="create-club-description"
+                                    type="text"
+                                    placeholder="Description"
+                                    aria-label="Club description"
+                                    aria-invalid={clubErrors.description ? 'true' : 'false'}
+                                    aria-describedby={clubErrors.description ? 'create-club-description-error' : undefined}
+                                    value={newClub.description}
+                                    onChange={updateNewClub('description')}
                                     className="form-input"
                                 />
+                                {clubErrors.description && <p id="create-club-description-error" role="alert" className="field-error">{clubErrors.description}</p>}
                                 <button
                                     type="submit"
                                     className="button primary"
-                                    disabled={loggedInUser.role !== 'Admin'}
+                                    disabled={!canCreateClub(loggedInUser) || creatingClub}
+                                    title={canCreateClub(loggedInUser) ? undefined : 'Only Admins can create clubs'}
                                 >
                                     Create Club
                                 </button>
@@ -476,9 +628,23 @@ function App() {
                                                 {club.description && <span className="description-text"> - {club.description}</span>}
                                             </span>
                                             <div className="list-item-buttons">
-                                                <button onClick={() => fetchActivitiesForClub(club.id)} className="button list-update">View Activities</button>
-                                                <button onClick={() => handleUpdateClub(club.id)} className="button list-update">Update</button>
-                                                <button onClick={() => handleDeleteClub(club.id)} className="button list-delete">Delete</button>
+                                                <button onClick={() => viewClubActivities(club.id)} className="button list-update">View Activities</button>
+                                                <button
+                                                    onClick={() => setRenameTarget(club)}
+                                                    className="button list-update"
+                                                    disabled={!canUpdateClub(loggedInUser, club)}
+                                                    title={canUpdateClub(loggedInUser, club) ? undefined : 'Only Admins can update clubs'}
+                                                >
+                                                    Update
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteTarget(club)}
+                                                    className="button list-delete"
+                                                    disabled={!canDeleteClub(loggedInUser, club)}
+                                                    title={canDeleteClub(loggedInUser, club) ? undefined : 'Only Admins can delete clubs'}
+                                                >
+                                                    Delete
+                                                </button>
                                             </div>
                                         </li>
                                     ))
@@ -486,6 +652,11 @@ function App() {
                                     <li className="no-data-text">No clubs found.</li>
                                 )}
                             </ul>
+                            {clubsPaging.hasMore && (
+                                <button className="button secondary" disabled={loadingMoreClubs} onClick={() => fetchClubs(clubsPaging.nextPage)}>
+                                    Load more clubs
+                                </button>
+                            )}
                         </div>
                     </div>
                 );
@@ -501,48 +672,23 @@ function App() {
 
                         <div className="section-container">
                             <h3 className="section-title">Create an Activity</h3>
-                            <form onSubmit={handleCreateActivity} className="form-container">
-                                <input 
-                                    type="text" 
-                                    placeholder="Club ID" 
-                                    value={newActivity.clubId} 
-                                    onChange={e => setNewActivity({ ...newActivity, clubId: e.target.value })} 
-                                    className="form-input"
-                                />
-                                <input 
-                                    type="text" 
-                                    placeholder="Activity Name" 
-                                    value={newActivity.name} 
-                                    onChange={e => setNewActivity({ ...newActivity, name: e.target.value })} 
-                                    className="form-input"
-                                />
-                                <input 
-                                    type="text" 
-                                    placeholder="Description" 
-                                    value={newActivity.description} 
-                                    onChange={e => setNewActivity({ ...newActivity, description: e.target.value })} 
-                                    className="form-input"
-                                />
-                                <button
-                                    type="submit"
-                                    className="button primary"
-                                    disabled={loggedInUser.role === 'Student'}
-                                >
-                                    Create Activity
-                                </button>
-                            </form>
+                            <ActivityForm canCreate={canCreateActivity(loggedInUser)} onCreate={handleCreateActivity} />
                         </div>
 
                         <div className="section-container">
                             <h3 className="section-title">Activities List</h3>
+                            {normalizeId(activityClubId) !== null && (
+                                <p className="filter-note">
+                                    <span>Filtered to club ID {activityClubId}.</span>
+                                    <button type="button" className="button secondary" onClick={viewAllActivities}>
+                                        Show all activities
+                                    </button>
+                                </p>
+                            )}
                             <ul className="list-group">
                                 {activities.length > 0 ? (
-                                    activities.map(activity => (
-                                        <li key={activity.id} className="list-item">
-                                            <span className="list-item-text">
-                                                <strong>{activity.club.name}</strong> -{activity.description} (Club ID: {activity.id})
-                                            </span>
-                                        </li>
+                                    activities.map((activity, index) => (
+                                        <ActivityItem key={activity?.id ?? `activity-${index}`} activity={activity} />
                                     ))
                                 ) : (
                                     <li className="no-data-text">No activities found.</li>
@@ -553,28 +699,23 @@ function App() {
                 );
             case 'join':
                 return (
-                    <div className="card card-sm">
+                    <div className="card card-2xl">
                         <div className="header-with-button">
-                            <h2 className="card-title">Join a Club &#127882;</h2>
+                            <h2 className="dashboard-card-title">Join a Club &#127882;</h2>
                             <button onClick={() => setCurrentPage('dashboard')} className="button secondary">
                                 Back
                             </button>
                         </div>
-                        <form onSubmit={handleJoinClub} className="form-container">
-                            <input 
-                                type="text" 
-                                placeholder="Club ID to join" 
-                                value={joinClubId} 
-                                onChange={e => setJoinClubId(e.target.value)} 
-                                className="form-input"
-                            />
-                            <button 
-                                type="submit" 
-                                className="button primary"
-                            >
-                                Join Club
-                            </button>
-                        </form>
+                        <ClubBrowser
+                            clubs={clubs}
+                            joinedClubIds={memberships.map(membership => membership?.club?.id)}
+                            canJoin={canJoinClub(loggedInUser)}
+                            joiningClubIds={joiningClubIds}
+                            hasMore={clubsPaging.hasMore}
+                            loadingMore={loadingMoreClubs}
+                            onJoin={handleJoinClub}
+                            onLoadMore={() => fetchClubs(clubsPaging.nextPage)}
+                        />
                     </div>
                 );
             case 'memberships':
@@ -588,13 +729,14 @@ function App() {
                         </div>
                         <div className="section-container">
                             <h3 className="section-title">Clubs I Have Joined</h3>
+                            {/* REQ-006: leaving a club is not offered - the backend has no leave/delete-membership endpoint. */}
                             <ul className="list-group">
                                 {memberships.length > 0 ? (
                                     memberships.map(membership => (
                                         <li key={membership.id} className="list-item">
                                             <span className="list-item-text">
-                                                <strong>{membership.club.name}</strong> (ID: {membership.club.id})
-                                                {membership.club.description && <span className="description-text"> - {membership.club.description}</span>}
+                                                <strong>{membership.club?.name ?? 'Unknown club'}</strong> (ID: {membership.club?.id ?? 'N/A'})
+                                                {membership.club?.description && <span className="description-text"> - {membership.club.description}</span>}
                                             </span>
                                         </li>
                                     ))
@@ -614,13 +756,13 @@ function App() {
     return (
         <div className="min-h-screen container-wrapper">
             <h1 className="main-title">Club Management System</h1>
+            {loggedInUser && <DevAuthNotice />}
             <div className="card-container">
                 {renderPage()}
             </div>
             {/* The popup components are now called here */}
             {showLoginPopup && (
                 <LoginPopup 
-                    showLoginPopup={showLoginPopup} 
                     setShowLoginPopup={setShowLoginPopup}
                     handleLogin={handleLogin}
                     loginDetails={loginDetails}
@@ -630,7 +772,6 @@ function App() {
             )}
             {showRegisterPopup && (
                 <RegisterPopup 
-                    showRegisterPopup={showRegisterPopup} 
                     setShowRegisterPopup={setShowRegisterPopup}
                     handleRegister={handleRegister}
                     registerDetails={registerDetails}
@@ -640,6 +781,24 @@ function App() {
                     setHumanVerification={setHumanVerification}
                 />
             )}
+            {renameTarget && (
+                <RenameClubModal
+                    club={renameTarget}
+                    submitting={renaming}
+                    onSubmit={(newName) => handleUpdateClub(renameTarget, newName)}
+                    onCancel={() => setRenameTarget(null)}
+                />
+            )}
+            {deleteTarget && (
+                <ConfirmDialog
+                    title="Delete club"
+                    message={`Are you sure you want to delete "${deleteTarget.name}"? This action cannot be undone.`}
+                    confirmLabel="Delete"
+                    onConfirm={() => handleDeleteClub(deleteTarget)}
+                    onCancel={() => setDeleteTarget(null)}
+                />
+            )}
+            <NotificationContainer notifications={notifications} onDismiss={dismiss} />
         </div>
     );
 }
