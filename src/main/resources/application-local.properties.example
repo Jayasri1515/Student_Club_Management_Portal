@@ -1,0 +1,7 @@
+# Safe template - contains PLACEHOLDERS ONLY.
+# To use: copy this file to application-local.properties (git-ignored), replace the
+# placeholder values, and start the app with  --spring.profiles.active=local
+# Never commit application-local.properties or real credentials.
+spring.datasource.url=jdbc:mysql://localhost:3306/club_db
+spring.datasource.username=<your-db-user>
+spring.datasource.password=<your-db-password>
