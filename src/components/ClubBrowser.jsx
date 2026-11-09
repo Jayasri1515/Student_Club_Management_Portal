@@ -1,7 +1,7 @@
 // REQ-005: browse / search clubs and join with one click (no manual club ID).
 // Joining uses the existing POST /memberships/join endpoint (handled by the parent).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { filterClubs } from '../utils/clubSearch.js';
 import { normalizeId, sameId } from '../utils/ids.js';
 
@@ -15,9 +15,18 @@ export default function ClubBrowser({
     loadingMore = false,
     onJoin,
     onLoadMore,
+    onSearchActiveChange,
 }) {
     const [query, setQuery] = useState('');
     const visibleClubs = filterClubs(clubs, query);
+    const searching = query.trim() !== '';
+
+    // Only the first page of clubs is loaded up front, so while a search is active the parent
+    // loads the remaining pages. The cleanup also ends the search when this view unmounts.
+    useEffect(() => {
+        onSearchActiveChange?.(searching);
+        return () => onSearchActiveChange?.(false);
+    }, [searching, onSearchActiveChange]);
     // CR-001: IDs may be numbers (backend) or strings; always compare normalized.
     const joined = new Set((joinedClubIds ?? []).map(normalizeId).filter((id) => id !== null));
     const joiningIds = [joiningClubId, ...(joiningClubIds ?? [])];
@@ -61,7 +70,11 @@ export default function ClubBrowser({
                     })
                 ) : (
                     <li className="no-data-text">
-                        {(clubs ?? []).length === 0 ? 'No clubs available.' : 'No clubs match your search.'}
+                        {(clubs ?? []).length === 0
+                            ? 'No clubs available.'
+                            : searching && hasMore
+                                ? 'Searching more clubs...'
+                                : 'No clubs match your search.'}
                     </li>
                 )}
             </ul>

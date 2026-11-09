@@ -74,3 +74,34 @@ describe('ClubBrowser', () => {
     expect(screen.getByText('No clubs available.')).toBeInTheDocument()
   })
 })
+
+describe('ClubBrowser search across pages', () => {
+  it('reports the search as active while there is text and inactive when cleared or unmounted', async () => {
+    const onSearchActiveChange = vi.fn()
+    const { unmount } = render(
+      <ClubBrowser clubs={clubs} joinedClubIds={[]} canJoin onJoin={vi.fn()} onSearchActiveChange={onSearchActiveChange} />,
+    )
+    expect(onSearchActiveChange).toHaveBeenLastCalledWith(false)
+    const search = screen.getByRole('searchbox', { name: /search clubs/i })
+    await userEvent.type(search, 'rob')
+    expect(onSearchActiveChange).toHaveBeenLastCalledWith(true)
+    await userEvent.clear(search)
+    expect(onSearchActiveChange).toHaveBeenLastCalledWith(false)
+    await userEvent.type(search, 'x')
+    unmount()
+    expect(onSearchActiveChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('says it is still searching, not "no match", while more pages remain', async () => {
+    setup({ hasMore: true })
+    await userEvent.type(screen.getByRole('searchbox', { name: /search clubs/i }), 'zzz')
+    expect(screen.getByText('Searching more clubs...')).toBeInTheDocument()
+    expect(screen.queryByText('No clubs match your search.')).not.toBeInTheDocument()
+  })
+
+  it('says no clubs match once every page is loaded', async () => {
+    setup({ hasMore: false })
+    await userEvent.type(screen.getByRole('searchbox', { name: /search clubs/i }), 'zzz')
+    expect(screen.getByText('No clubs match your search.')).toBeInTheDocument()
+  })
+})

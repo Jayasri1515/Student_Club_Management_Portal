@@ -168,6 +168,7 @@ function App() {
     // State to manage data from the backend
     const [clubs, setClubs] = useState([]);
     const [clubsPaging, setClubsPaging] = useState({ nextPage: 1, hasMore: false });
+    const [clubSearchActive, setClubSearchActive] = useState(false);
     const [activities, setActivities] = useState([]);
     const [memberships, setMemberships] = useState([]);
 
@@ -238,6 +239,17 @@ function App() {
         return () => scope.abort();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on page/user/filter only
     }, [currentPage, loggedInUser, activityClubId]);
+
+    // While a club search is active, keep loading the next page until every club has been
+    // fetched, so a match on a later page is found. Each success replaces `clubsPaging`, which
+    // re-runs this; a failed page leaves it unchanged, so there is no retry loop (the manual
+    // "Load more clubs" button remains).
+    useEffect(() => {
+        if (loggedInUser && currentPage === 'join' && clubSearchActive && clubsPaging.hasMore && !loadingMoreClubsRef.current) {
+            fetchClubs(clubsPaging.nextPage);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on search state and paging only
+    }, [clubSearchActive, clubsPaging, currentPage, loggedInUser]);
 
     // --- API Call functions ---
     // CR-003: GET /clubs/getclubs returns a Spring Page (default size 10). The response
@@ -825,6 +837,7 @@ function App() {
                             loadingMore={loadingMoreClubs}
                             onJoin={handleJoinClub}
                             onLoadMore={() => fetchClubs(clubsPaging.nextPage)}
+                            onSearchActiveChange={setClubSearchActive}
                         />
                     </div>
                 );
