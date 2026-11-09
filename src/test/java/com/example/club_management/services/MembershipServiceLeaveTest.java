@@ -2,10 +2,11 @@ package com.example.club_management.services;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,21 +32,33 @@ class MembershipServiceLeaveTest {
         User user = new User();
         Club club = new Club();
         Membership membership = new Membership();
-        when(membershipRepository.findByUserAndClub(user, club)).thenReturn(membership);
+        when(membershipRepository.findAllByUserAndClub(user, club)).thenReturn(List.of(membership));
 
         assertTrue(service.leaveClub(user, club));
 
-        verify(membershipRepository).delete(membership);
+        verify(membershipRepository).deleteAll(List.of(membership));
+    }
+
+    @Test
+    void leaveClubRemovesEveryDuplicateRowInsteadOfFailing() {
+        User user = new User();
+        Club club = new Club();
+        List<Membership> duplicates = List.of(new Membership(), new Membership());
+        when(membershipRepository.findAllByUserAndClub(user, club)).thenReturn(duplicates);
+
+        assertTrue(service.leaveClub(user, club));
+
+        verify(membershipRepository).deleteAll(duplicates);
     }
 
     @Test
     void leaveClubReturnsFalseWhenNotAMember() {
         User user = new User();
         Club club = new Club();
-        when(membershipRepository.findByUserAndClub(user, club)).thenReturn(null);
+        when(membershipRepository.findAllByUserAndClub(user, club)).thenReturn(List.of());
 
         assertFalse(service.leaveClub(user, club));
 
-        verify(membershipRepository, never()).delete(any(Membership.class));
+        verify(membershipRepository, never()).deleteAll(org.mockito.ArgumentMatchers.<Iterable<Membership>>any());
     }
 }

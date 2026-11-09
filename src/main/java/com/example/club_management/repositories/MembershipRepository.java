@@ -12,5 +12,8 @@ import com.example.club_management.models.User;
 @Repository
 public interface MembershipRepository extends JpaRepository<Membership, Long> {
     List<Membership> findByUser(User user);
-    Membership findByUserAndClub(User user, Club club);
+    boolean existsByUserAndClub(User user, Club club);
+
+    /** A list, not a single result: older data may contain duplicate rows for the same user and club. */
+    List<Membership> findAllByUserAndClub(User user, Club club);
 }
