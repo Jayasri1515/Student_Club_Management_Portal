@@ -9,12 +9,10 @@
 //   Create Activity  : any logged-in user whose role is not 'Student'
 //   Join Club        : any logged-in user
 //   Leave Club       : any logged-in user, for their OWN membership only (REQ-006)
-//   Update Activity  : same as Create Activity - any logged-in user who is not a Student (REQ-008)
-//   Delete Activity  : same as Create Activity (REQ-008)
+//   Update Activity  : role === 'Admin' only (REQ-008)
+//   Delete Activity  : role === 'Admin' only (REQ-008)
 //
-// Update/Delete Activity: no rule was given by the product owner, so these default to the
-// existing Create Activity rule. NEEDS PRODUCT OWNER CONFIRMATION (a stricter Admin-only rule
-// would be a one-line change below). The backend enforces none of these rules.
+// The backend enforces none of these rules.
 //
 // Leaders and Students may not update or delete clubs, including a club they lead.
 // The `club` argument is accepted (and currently unused) so call sites need not
@@ -66,13 +64,12 @@ export function canLeaveClub(user, membership) {
     return String(owner) === String(user.id);
 }
 
-// REQ-008 (rule needs product owner confirmation - see header)
-// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability
+// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability (rule is Admin only)
 export function canUpdateActivity(user, activity) {
-    return canCreateActivity(user);
+    return isAdmin(user);
 }
 
-// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability
+// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability (rule is Admin only)
 export function canDeleteActivity(user, activity) {
-    return canCreateActivity(user);
+    return isAdmin(user);
 }

@@ -142,17 +142,17 @@ describe('REQ-008: activity update / delete', () => {
     return (await screen.findByText('Opening Match')).closest('li')
   }
 
-  it('Student sees Edit and Delete disabled and nothing is sent', async () => {
-    const { user, calls } = await loginAs('Student', listRoute(() => [activity]))
+  it.each(['Student', 'Leader'])('%s sees Edit and Delete disabled and nothing is sent', async (role) => {
+    const { user, calls } = await loginAs(role, listRoute(() => [activity]))
     await openActivities(user)
     expect(screen.getByRole('button', { name: 'Edit activity Opening Match' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Delete activity Opening Match' })).toBeDisabled()
     expect(calls.some((c) => c.method === 'PUT' || c.method === 'DELETE')).toBe(false)
   })
 
-  it('Leader can edit: PUT /activities/{id} with title, description and date only; list is reloaded', async () => {
+  it('Admin can edit: PUT /activities/{id} with title, description and date only; list is reloaded', async () => {
     let current = activity
-    const { user, calls } = await loginAs('Leader', {
+    const { user, calls } = await loginAs('Admin', {
       ...listRoute(() => [current]),
       'PUT /activities/11': (body) => {
         current = { ...current, ...body }

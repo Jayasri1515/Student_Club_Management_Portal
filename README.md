@@ -61,7 +61,7 @@ owner. The backend performs **no** role or ownership checks, so the UI is the on
 | Create Activity | any logged-in user except `Student` (Admin, Leader) |
 | Join Club | any logged-in user |
 | Leave Club | any logged-in user, own membership only |
-| Update Activity / Delete Activity | same as Create Activity (Admin, Leader). **Not confirmed by the product owner**: default only, change in `src/utils/permissions.js` |
+| Update Activity / Delete Activity | Admin only |
 
 ## Backend contract notes and known limitations
 

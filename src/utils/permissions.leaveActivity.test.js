@@ -30,15 +30,15 @@ describe('REQ-006 canLeaveClub', () => {
   })
 })
 
-describe('REQ-008 activity update / delete (default rule: same as Create Activity, needs product owner confirmation)', () => {
+describe('REQ-008 activity update / delete (Admin only)', () => {
   const activity = { id: 5, club: { id: 1 } }
 
-  it('Admin and Leader may update and delete; Student may not', () => {
+  it('Admin may update and delete; Leader and Student may not', () => {
     expect(canUpdateActivity(admin, activity)).toBe(true)
-    expect(canUpdateActivity(leader, activity)).toBe(true)
+    expect(canUpdateActivity(leader, activity)).toBe(false)
     expect(canUpdateActivity(student, activity)).toBe(false)
     expect(canDeleteActivity(admin, activity)).toBe(true)
-    expect(canDeleteActivity(leader, activity)).toBe(true)
+    expect(canDeleteActivity(leader, activity)).toBe(false)
     expect(canDeleteActivity(student, activity)).toBe(false)
   })
 
