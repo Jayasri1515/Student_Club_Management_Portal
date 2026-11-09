@@ -35,7 +35,7 @@ export default function ActivityItem({
                             className="button list-update"
                             aria-label={`Edit activity ${title}`}
                             disabled={!canEdit || !hasId || busy}
-                            title={canEdit ? undefined : "Students cannot edit activities"}
+                            title={canEdit ? undefined : "Only Admins can edit activities"}
                             onClick={() => onEdit(activity)}
                         >
                             Edit
@@ -47,7 +47,7 @@ export default function ActivityItem({
                             className="button list-delete"
                             aria-label={`Delete activity ${title}`}
                             disabled={!canDelete || !hasId || busy}
-                            title={canDelete ? undefined : "Students cannot delete activities"}
+                            title={canDelete ? undefined : "Only Admins can delete activities"}
                             onClick={() => onDelete(activity)}
                         >
                             Delete

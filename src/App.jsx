@@ -323,6 +323,7 @@ function App() {
 
     const logout = (message = 'Logged out.') => {
         setLoggedInUser(null);
+        setLoginDetails({ username: '', password: '' });
         setCurrentPage('dashboard');
         setActivityClubId(null);
         setClubs([]);
@@ -365,6 +366,7 @@ function App() {
             // The backend returns the User entity (no token) - see apiClient.js.
             const user = await apiClient.post('/auth/login', loginDetails, lifeOptions());
             setLoggedInUser(user);
+            setLoginDetails({ username: '', password: '' });
             success(`Login successful! Welcome, ${user.username}.`);
             setShowLoginPopup(false);
             setCurrentPage('dashboard');

@@ -29,6 +29,12 @@ describe('ActivityItem actions (REQ-008)', () => {
     expect(screen.getByRole('button', { name: 'Delete activity Opening Match' })).toBeDisabled()
   })
 
+  it('explains that only Admins can edit or delete when the buttons are disabled', () => {
+    renderItem({ onEdit: vi.fn(), onDelete: vi.fn(), canEdit: false, canDelete: false })
+    expect(screen.getByRole('button', { name: 'Edit activity Opening Match' })).toHaveAttribute('title', 'Only Admins can edit activities')
+    expect(screen.getByRole('button', { name: 'Delete activity Opening Match' })).toHaveAttribute('title', 'Only Admins can delete activities')
+  })
+
   it('disables the buttons while busy and when the activity has no id', () => {
     const { unmount } = renderItem({ onEdit: vi.fn(), onDelete: vi.fn(), canEdit: true, canDelete: true, busy: true })
     expect(screen.getByRole('button', { name: 'Edit activity Opening Match' })).toBeDisabled()
