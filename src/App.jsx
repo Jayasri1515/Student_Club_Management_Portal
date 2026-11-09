@@ -107,7 +107,6 @@ const RegisterPopup = ({ setShowRegisterPopup, handleRegister, registerDetails, 
                 className="form-input"
             >
                 <option value="Student">Student</option>
-                <option value="Admin">Admin</option>
                 <option value="Leader">Leader</option>
             </select>
 

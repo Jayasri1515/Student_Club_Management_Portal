@@ -63,6 +63,8 @@ owner. The backend performs **no** role or ownership checks, so the UI is the on
 | Leave Club | any logged-in user, own membership only |
 | Update Activity / Delete Activity | Admin only |
 
+The registration form only offers `Student` and `Leader`; `Admin` accounts are not self-service. This is a UI choice only: the backend `/register` still accepts any role in the request body, so it does not prevent anyone from creating an Admin by calling the API directly.
+
 ## Backend contract notes and known limitations
 
 Verified against the `back_end` branch (`AuthController`, `ClubController`,

@@ -340,6 +340,13 @@ describe('CR-006 accessibility of the login / register dialogs', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('self-registration does not offer the Admin role', async () => {
+    const { user } = await openLogin()
+    await user.click(screen.getByRole('button', { name: 'Go to Register' }))
+    const options = within(screen.getByLabelText('Role')).getAllByRole('option').map((o) => o.value)
+    expect(options).toEqual(['Student', 'Leader'])
+  })
+
   it('the delete confirmation focuses Cancel, so Enter does not delete', async () => {
     const { user, calls } = await loginAs('Admin')
     await user.click(screen.getByRole('button', { name: 'Go to Club Management' }))
