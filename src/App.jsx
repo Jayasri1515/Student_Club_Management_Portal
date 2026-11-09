@@ -7,6 +7,9 @@ import {
     canDeleteClub,
     canCreateActivity,
     canJoinClub,
+    canLeaveClub,
+    canUpdateActivity,
+    canDeleteActivity,
 } from './utils/permissions.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import NotificationContainer from './components/Notification.jsx';
@@ -15,6 +18,7 @@ import ConfirmDialog from './components/ConfirmDialog.jsx';
 import ActivityItem from './components/ActivityItem.jsx';
 import ClubBrowser from './components/ClubBrowser.jsx';
 import ActivityForm from './components/ActivityForm.jsx';
+import EditActivityModal from './components/EditActivityModal.jsx';
 import Modal from './components/Modal.jsx';
 import DevAuthNotice from './components/DevAuthNotice.jsx';
 import { normalizeId, sameId } from './utils/ids.js';
@@ -178,6 +182,16 @@ function App() {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [joiningClubIds, setJoiningClubIds] = useState([]);
     const [loadingMoreClubs, setLoadingMoreClubs] = useState(false);
+    // REQ-006: leave club (confirmation target + clubs currently being left)
+    const [leaveTarget, setLeaveTarget] = useState(null);
+    const [leavingClubIds, setLeavingClubIds] = useState([]);
+    const leavingRef = useRef(new Set());
+    // REQ-008: activity edit / delete (dialog targets + save/delete in flight)
+    const [editActivityTarget, setEditActivityTarget] = useState(null);
+    const [savingActivity, setSavingActivity] = useState(false);
+    const [deleteActivityTarget, setDeleteActivityTarget] = useState(null);
+    const [busyActivityIds, setBusyActivityIds] = useState([]);
+    const activityBusyRef = useRef(new Set());
     // Synchronous guards (state updates are asynchronous, so a fast double click could
     // otherwise start two requests).
     const joiningRef = useRef(new Set());
@@ -522,6 +536,93 @@ function App() {
         }
     };
 
+    // REQ-006: DELETE /memberships/user/{userId}/club/{clubId} -> 204 on success.
+    // 404 means the membership no longer exists (or user/club not found): the list is refreshed
+    // either way. The user can only leave through their own membership (canLeaveClub).
+    const handleLeaveClub = async (membership) => {
+        setLeaveTarget(null);
+        if (!canLeaveClub(loggedInUser, membership)) return;
+        const clubKey = normalizeId(membership?.club?.id);
+        if (clubKey === null) {
+            notifyError('This membership cannot be removed because the club has no ID.');
+            return;
+        }
+        if (leavingRef.current.has(clubKey)) return;
+        leavingRef.current.add(clubKey);
+        setLeavingClubIds(Array.from(leavingRef.current));
+        const clubName = membership.club?.name ?? `club ${clubKey}`;
+        try {
+            await apiClient.delete(`/memberships/user/${loggedInUser.id}/club/${clubKey}`, lifeOptions());
+            success(`You have left ${clubName}.`);
+            fetchMemberships(loggedInUser.id);
+        } catch (error) {
+            if (isAbortError(error)) return;
+            if (error.status === 404) {
+                notifyError(`Could not leave ${clubName}: ${error.message}`);
+                fetchMemberships(loggedInUser.id);
+            } else {
+                notifyError(`Failed to leave club: ${error.message}`);
+            }
+        } finally {
+            leavingRef.current.delete(clubKey);
+            setLeavingClubIds(Array.from(leavingRef.current));
+        }
+    };
+
+    const setActivityBusy = (activityKey, busy) => {
+        if (busy) activityBusyRef.current.add(activityKey);
+        else activityBusyRef.current.delete(activityKey);
+        setBusyActivityIds(Array.from(activityBusyRef.current));
+    };
+
+    // REQ-008: PUT /activities/{id} with { title, description, date } -> 200 with the activity.
+    // The backend ignores the club (an activity cannot be moved). 400 = invalid title,
+    // 404 = the activity no longer exists (the list is refreshed and the dialog closed).
+    const handleUpdateActivity = async (activity, values) => {
+        if (!canUpdateActivity(loggedInUser, activity)) return;
+        const activityKey = normalizeId(activity?.id);
+        if (activityKey === null || activityBusyRef.current.has(activityKey)) return;
+        setActivityBusy(activityKey, true);
+        setSavingActivity(true);
+        try {
+            const data = await apiClient.put(`/activities/${activityKey}`, values, lifeOptions());
+            success(`Activity updated: ${data?.title ?? values.title}`);
+            setEditActivityTarget(null);
+            loadActivities();
+        } catch (error) {
+            if (isAbortError(error)) return;
+            notifyError(`Update Activity Error: ${error.message}`);
+            if (error.status === 404) {
+                setEditActivityTarget(null);
+                loadActivities();
+            }
+            // 400 and other errors: the dialog stays open so the input is not lost.
+        } finally {
+            setActivityBusy(activityKey, false);
+            setSavingActivity(false);
+        }
+    };
+
+    // REQ-008: DELETE /activities/{id} -> 204. 404 = already gone, the list is refreshed.
+    const handleDeleteActivity = async (activity) => {
+        setDeleteActivityTarget(null);
+        if (!canDeleteActivity(loggedInUser, activity)) return;
+        const activityKey = normalizeId(activity?.id);
+        if (activityKey === null || activityBusyRef.current.has(activityKey)) return;
+        setActivityBusy(activityKey, true);
+        try {
+            await apiClient.delete(`/activities/${activityKey}`, lifeOptions());
+            success('Activity deleted successfully.');
+            loadActivities();
+        } catch (error) {
+            if (isAbortError(error)) return;
+            notifyError(`Delete Activity Error: ${error.message}`);
+            if (error.status === 404) loadActivities();
+        } finally {
+            setActivityBusy(activityKey, false);
+        }
+    };
+
     // Component Rendering based on currentPage state
     const renderPage = () => {
         // Only render the landing page if the user is not logged in AND no pop-up is active
@@ -688,7 +789,15 @@ function App() {
                             <ul className="list-group">
                                 {activities.length > 0 ? (
                                     activities.map((activity, index) => (
-                                        <ActivityItem key={activity?.id ?? `activity-${index}`} activity={activity} />
+                                        <ActivityItem
+                                            key={activity?.id ?? `activity-${index}`}
+                                            activity={activity}
+                                            canEdit={canUpdateActivity(loggedInUser, activity)}
+                                            canDelete={canDeleteActivity(loggedInUser, activity)}
+                                            busy={busyActivityIds.some((id) => sameId(id, activity?.id))}
+                                            onEdit={setEditActivityTarget}
+                                            onDelete={setDeleteActivityTarget}
+                                        />
                                     ))
                                 ) : (
                                     <li className="no-data-text">No activities found.</li>
@@ -729,7 +838,6 @@ function App() {
                         </div>
                         <div className="section-container">
                             <h3 className="section-title">Clubs I Have Joined</h3>
-                            {/* REQ-006: leaving a club is not offered - the backend has no leave/delete-membership endpoint. */}
                             <ul className="list-group">
                                 {memberships.length > 0 ? (
                                     memberships.map(membership => (
@@ -738,6 +846,21 @@ function App() {
                                                 <strong>{membership.club?.name ?? 'Unknown club'}</strong> (ID: {membership.club?.id ?? 'N/A'})
                                                 {membership.club?.description && <span className="description-text"> - {membership.club.description}</span>}
                                             </span>
+                                            <div className="list-item-buttons">
+                                                <button
+                                                    type="button"
+                                                    className="button list-delete"
+                                                    aria-label={`Leave ${membership.club?.name ?? 'club'}`}
+                                                    disabled={
+                                                        !canLeaveClub(loggedInUser, membership) ||
+                                                        normalizeId(membership.club?.id) === null ||
+                                                        leavingClubIds.some((id) => sameId(id, membership.club?.id))
+                                                    }
+                                                    onClick={() => setLeaveTarget(membership)}
+                                                >
+                                                    Leave
+                                                </button>
+                                            </div>
                                         </li>
                                     ))
                                 ) : (
@@ -796,6 +919,32 @@ function App() {
                     confirmLabel="Delete"
                     onConfirm={() => handleDeleteClub(deleteTarget)}
                     onCancel={() => setDeleteTarget(null)}
+                />
+            )}
+            {leaveTarget && (
+                <ConfirmDialog
+                    title="Leave club"
+                    message={`Are you sure you want to leave "${leaveTarget.club?.name ?? 'this club'}"? You can join again later.`}
+                    confirmLabel="Leave"
+                    onConfirm={() => handleLeaveClub(leaveTarget)}
+                    onCancel={() => setLeaveTarget(null)}
+                />
+            )}
+            {editActivityTarget && (
+                <EditActivityModal
+                    activity={editActivityTarget}
+                    submitting={savingActivity}
+                    onSubmit={(values) => handleUpdateActivity(editActivityTarget, values)}
+                    onCancel={() => setEditActivityTarget(null)}
+                />
+            )}
+            {deleteActivityTarget && (
+                <ConfirmDialog
+                    title="Delete activity"
+                    message={`Are you sure you want to delete "${deleteActivityTarget.title ?? 'this activity'}"? This action cannot be undone.`}
+                    confirmLabel="Delete"
+                    onConfirm={() => handleDeleteActivity(deleteActivityTarget)}
+                    onCancel={() => setDeleteActivityTarget(null)}
                 />
             )}
             <NotificationContainer notifications={notifications} onDismiss={dismiss} />

@@ -117,15 +117,6 @@ describe('App integration (mocked backend)', () => {
     expect(screen.getByRole('button', { name: 'Join Robotics' })).toBeEnabled()
   })
 
-  it('REQ-006: My Memberships offers no leave action (backend has no endpoint)', async () => {
-    const { user } = await loginAs('Student', {
-      'GET /memberships/user/5': () => json([{ id: 3, club: clubList[0] }, { id: 4, club: null }]),
-    })
-    await user.click(screen.getByRole('button', { name: 'View My Memberships' }))
-    expect(await screen.findByText('Chess Club')).toBeInTheDocument()
-    expect(screen.getByText('Unknown club')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /leave/i })).not.toBeInTheDocument()
-  })
 
   it('REQ-003: Student cannot create clubs or activities; Admin can create clubs', async () => {
     const student = await loginAs('Student')

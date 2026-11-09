@@ -60,6 +60,8 @@ owner. The backend performs **no** role or ownership checks, so the UI is the on
 | Update Club / Delete Club | `Admin` only (confirmed); Leaders and Students see the controls disabled |
 | Create Activity | any logged-in user except `Student` (Admin, Leader) |
 | Join Club | any logged-in user |
+| Leave Club | any logged-in user, own membership only |
+| Update Activity / Delete Activity | same as Create Activity (Admin, Leader). **Not confirmed by the product owner**: default only, change in `src/utils/permissions.js` |
 
 ## Backend contract notes and known limitations
 
@@ -71,12 +73,18 @@ Verified against the `back_end` branch (`AuthController`, `ClubController`,
   verify the password and has no Spring Security. The api client therefore sends **no**
   `Authorization` header. Add token support only after the backend defines a token field
   and header format.
-- **Leave club (REQ-006):** the backend only has `POST /memberships/join` and
-  `GET /memberships/user/{userId}`. There is no leave / delete-membership endpoint, so
-  "My Memberships" has no Leave action.
-- **Activity update / delete (REQ-008):** the backend only has `GET /activities/getactivities`,
-  `GET /activities/club/{clubId}` and `POST /activities`. There are no update/delete
-  endpoints, so the UI offers none.
+- **Leave club (REQ-006):** uses `DELETE /api/memberships/user/{userId}/club/{clubId}`
+  (204 on success, 404 if the user, club or membership is not found). This endpoint is added
+  by backend PR #6 and **requires that backend**; against an older backend the request fails
+  and the UI shows the error. "My Memberships" has a Leave button (with a confirmation dialog)
+  on every membership of the logged-in user.
+- **Activity update / delete (REQ-008):** use `PUT /api/activities/{id}` with
+  `{ title, description, date }` (200 with the activity, 400 if the title is blank, 404 if not
+  found; the club cannot be changed) and `DELETE /api/activities/{id}` (204 / 404). Both are
+  added by backend PR #6 and require that backend. The activities list has Edit (dialog) and
+  Delete (confirmation dialog) buttons.
+- **Authorization for these three actions is UI-only:** the backend has no authentication and
+  cannot verify who is calling.
 - **Activity fields:** the backend `Activity` has `title` (not `name`), `description`, `date`
   and `club`. The create form now sends `title`.
 - **Club rename:** `PUT /clubs/{id}` overwrites `name`, `description` and `leader`, so the UI

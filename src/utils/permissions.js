@@ -8,13 +8,22 @@
 //   Delete Club      : role === 'Admin' only  (confirmed)
 //   Create Activity  : any logged-in user whose role is not 'Student'
 //   Join Club        : any logged-in user
+//   Leave Club       : any logged-in user, for their OWN membership only (REQ-006)
+//   Update Activity  : same as Create Activity - any logged-in user who is not a Student (REQ-008)
+//   Delete Activity  : same as Create Activity (REQ-008)
+//
+// Update/Delete Activity: no rule was given by the product owner, so these default to the
+// existing Create Activity rule. NEEDS PRODUCT OWNER CONFIRMATION (a stricter Admin-only rule
+// would be a one-line change below). The backend enforces none of these rules.
 //
 // Leaders and Students may not update or delete clubs, including a club they lead.
 // The `club` argument is accepted (and currently unused) so call sites need not
 // change if an ownership rule is ever added.
 //
-// Activity update/delete: the backend exposes no such endpoints (REQ-008), so
-// there is intentionally no permission helper for them yet.
+// Backend contract used by the corresponding UI actions:
+//   Leave Club       : DELETE /memberships/user/{userId}/club/{clubId} -> 204 / 404
+//   Update Activity  : PUT    /activities/{id}  { title, description, date } -> 200 / 400 / 404
+//   Delete Activity  : DELETE /activities/{id}  -> 204 / 404
 
 export const ROLES = Object.freeze({
     ADMIN: 'Admin',
@@ -46,4 +55,24 @@ export function canCreateActivity(user) {
 
 export function canJoinClub(user) {
     return isLoggedIn(user);
+}
+
+// REQ-006: a user may only leave a club through their own membership. The memberships list
+// is fetched for the logged-in user; if a membership carries a user, it must be that user.
+export function canLeaveClub(user, membership) {
+    if (!isLoggedIn(user)) return false;
+    const owner = membership?.user?.id;
+    if (owner === undefined || owner === null) return true;
+    return String(owner) === String(user.id);
+}
+
+// REQ-008 (rule needs product owner confirmation - see header)
+// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability
+export function canUpdateActivity(user, activity) {
+    return canCreateActivity(user);
+}
+
+// eslint-disable-next-line no-unused-vars -- `activity` kept for call-site stability
+export function canDeleteActivity(user, activity) {
+    return canCreateActivity(user);
 }

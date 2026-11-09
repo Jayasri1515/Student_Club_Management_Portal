@@ -2,7 +2,18 @@
 
 import { getActivityDisplay } from '../utils/activity.js';
 
-export default function ActivityItem({ activity }) {
+// REQ-008: when onEdit / onDelete are supplied, Edit and Delete buttons are shown; they are
+// disabled (with an explanatory title) when the user is not permitted (canEdit / canDelete)
+// or the activity has no id. Same pattern as the Update / Delete Club buttons.
+export default function ActivityItem({
+    activity,
+    onEdit,
+    onDelete,
+    canEdit = false,
+    canDelete = false,
+    busy = false,
+}) {
+    const hasId = activity?.id !== undefined && activity?.id !== null;
     const { activityId, clubId, clubName, title, description, date } = getActivityDisplay(activity);
     return (
         <li className="list-item">
@@ -16,6 +27,34 @@ export default function ActivityItem({ activity }) {
                     {' '}[Activity ID: {activityId} | Club ID: {clubId}]
                 </span>
             </span>
+            {(onEdit || onDelete) && (
+                <div className="list-item-buttons">
+                    {onEdit && (
+                        <button
+                            type="button"
+                            className="button list-update"
+                            aria-label={`Edit activity ${title}`}
+                            disabled={!canEdit || !hasId || busy}
+                            title={canEdit ? undefined : "Students cannot edit activities"}
+                            onClick={() => onEdit(activity)}
+                        >
+                            Edit
+                        </button>
+                    )}
+                    {onDelete && (
+                        <button
+                            type="button"
+                            className="button list-delete"
+                            aria-label={`Delete activity ${title}`}
+                            disabled={!canDelete || !hasId || busy}
+                            title={canDelete ? undefined : "Students cannot delete activities"}
+                            onClick={() => onDelete(activity)}
+                        >
+                            Delete
+                        </button>
+                    )}
+                </div>
+            )}
         </li>
     );
 }
