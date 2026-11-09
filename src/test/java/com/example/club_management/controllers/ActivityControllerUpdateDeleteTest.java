@@ -112,6 +112,75 @@ class ActivityControllerUpdateDeleteTest {
         assertEquals("Old title", existing.getTitle());
     }
 
+    private String putAndExpectOk(String body) throws Exception {
+        when(activityService.findById(5L)).thenReturn(Optional.of(existing));
+        when(activityService.save(any(Activity.class))).thenAnswer(inv -> inv.getArgument(0));
+        return mockMvc.perform(put("/api/activities/5").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    }
+
+    private void putAndExpectBadRequest(String body, String message) throws Exception {
+        when(activityService.findById(5L)).thenReturn(Optional.of(existing));
+        mockMvc.perform(put("/api/activities/5").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(message));
+        verify(activityService, never()).save(any());
+        assertEquals("Old title", existing.getTitle());
+        assertEquals("Old description", existing.getDescription());
+        assertEquals(LocalDate.of(2026, 1, 1), existing.getDate());
+    }
+
+    @Test
+    void omittedDescriptionAndDateAreKept() throws Exception {
+        putAndExpectOk("{\"title\":\"Only a new title\"}");
+
+        assertEquals("Only a new title", existing.getTitle());
+        assertEquals("Old description", existing.getDescription());
+        assertEquals(LocalDate.of(2026, 1, 1), existing.getDate());
+    }
+
+    @Test
+    void explicitNullOrEmptyClearsDescriptionAndDate() throws Exception {
+        putAndExpectOk("{\"title\":\"t\",\"description\":null,\"date\":null}");
+        assertEquals(null, existing.getDescription());
+        assertEquals(null, existing.getDate());
+
+        existing.setDescription("Old description");
+        putAndExpectOk("{\"title\":\"t\",\"description\":\"\"}");
+        assertEquals("", existing.getDescription());
+    }
+
+    @Test
+    void titleOf255CharactersIsAccepted() throws Exception {
+        putAndExpectOk("{\"title\":\"" + "a".repeat(255) + "\"}");
+        assertEquals(255, existing.getTitle().length());
+    }
+
+    @Test
+    void titleOf256CharactersIsRejected() throws Exception {
+        putAndExpectBadRequest("{\"title\":\"" + "a".repeat(256) + "\"}",
+                "Activity title must be 255 characters or fewer.");
+    }
+
+    @Test
+    void descriptionOver255CharactersIsRejected() throws Exception {
+        putAndExpectBadRequest("{\"title\":\"t\",\"description\":\"" + "d".repeat(256) + "\"}",
+                "Description must be 255 characters or fewer.");
+    }
+
+    @Test
+    void invalidDateOrWrongTypesAreRejected() throws Exception {
+        putAndExpectBadRequest("{\"title\":\"t\",\"date\":\"03/02/2026\"}", "Date must be a valid date (YYYY-MM-DD).");
+        putAndExpectBadRequest("{\"title\":\"t\",\"date\":20260203}", "Date must be a valid date (YYYY-MM-DD).");
+        putAndExpectBadRequest("{\"title\":\"t\",\"description\":5}", "Description must be text.");
+        putAndExpectBadRequest("{\"title\":123}", "Activity title is required.");
+    }
+
+    @Test
+    void nonObjectBodyIsRejected() throws Exception {
+        putAndExpectBadRequest("[1,2]", "Request body must be a JSON object.");
+    }
+
     @Test
     void deleteReturns204WhenActivityExists() throws Exception {
         when(activityService.findById(5L)).thenReturn(Optional.of(existing));

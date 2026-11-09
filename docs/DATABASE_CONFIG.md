@@ -37,5 +37,9 @@ Option B - git-ignored local profile:
 - Use a dedicated, least-privilege MySQL account for the application, not `root`.
 - Use a long, randomly generated password and a different one per environment.
 - Never commit `.env`, `application-local.properties`, or any file containing real credentials.
-- Tests that start the full Spring context (`@SpringBootTest`) need these variables set
-  (use throwaway test values or an in-memory database).
+- The startup check treats a value that is still an unedited example placeholder (anything of the form
+  `<...>`, such as `<your-db-password>`) as missing.
+- The check is skipped when `spring.datasource.url` points at an in-memory database (`jdbc:h2:`,
+  `jdbc:hsqldb:`, `jdbc:derby:`), so tests that use one need no credentials. Tests that start the full
+  context against MySQL (`@SpringBootTest` with the default URL) still need `DB_USERNAME` and `DB_PASSWORD`
+  set to throwaway test values.

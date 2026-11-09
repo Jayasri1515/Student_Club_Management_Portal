@@ -83,7 +83,36 @@ class DatabaseEnvironmentValidatorTest {
     @Test
     void committedConfigUsesPlaceholdersNotLiteralCredentials() throws IOException {
         Properties props = PropertiesLoaderUtils.loadProperties(new ClassPathResource("application.properties"));
-        assertEquals("${DB_USERNAME}", props.getProperty("spring.datasource.username"));
-        assertEquals("${DB_PASSWORD}", props.getProperty("spring.datasource.password"));
+        assertEquals("${DB_USERNAME:}", props.getProperty("spring.datasource.username"));
+        assertEquals("${DB_PASSWORD:}", props.getProperty("spring.datasource.password"));
+    }
+
+    @Test
+    void embeddedInMemoryDatabaseNeedsNoCredentials() throws IOException {
+        StandardEnvironment env = environmentWith(Map.of("spring.datasource.url", "jdbc:h2:mem:testdb"));
+        assertTrue(DatabaseEnvironmentValidator.findMissing(env).isEmpty());
+        validator.postProcessEnvironment(env, null); // must not throw
+    }
+
+    @Test
+    void mysqlUrlStillRequiresCredentials() throws IOException {
+        StandardEnvironment env = environmentWith(Map.of("spring.datasource.url", "jdbc:mysql://db.example:3306/club_db"));
+        assertEquals(List.of("DB_USERNAME", "DB_PASSWORD"), DatabaseEnvironmentValidator.findMissing(env));
+    }
+
+    @Test
+    void uneditedExamplePlaceholdersAreRejected() throws IOException {
+        StandardEnvironment env = environmentWith(
+                Map.of("DB_USERNAME", "<your-db-user>", "DB_PASSWORD", "<your-db-password>"));
+        assertEquals(List.of("DB_USERNAME", "DB_PASSWORD"), DatabaseEnvironmentValidator.findMissing(env));
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> validator.postProcessEnvironment(env, null));
+        assertFalse(ex.getMessage().contains("<your-db-password>=") , "values must never be echoed");
+    }
+
+    @Test
+    void realLookingValuesContainingAngleBracketsInTheMiddleAreAccepted() throws IOException {
+        StandardEnvironment env = environmentWith(Map.of("DB_USERNAME", "app_user", "DB_PASSWORD", "pa<ss>word"));
+        assertTrue(DatabaseEnvironmentValidator.findMissing(env).isEmpty());
     }
 }
