@@ -27,6 +27,20 @@ public class MembershipService {
         return membershipRepository.save(membership);
     }
     
+    /**
+     * Removes the membership of the given user in the given club.
+     *
+     * @return true if a membership existed and was removed, false if the user was not a member
+     */
+    public boolean leaveClub(User user, Club club) {
+        Membership membership = membershipRepository.findByUserAndClub(user, club);
+        if (membership == null) {
+            return false;
+        }
+        membershipRepository.delete(membership);
+        return true;
+    }
+
     public List<Membership> findByUser(User user) {
         // Correctly calls the repository method with the user and pageable objects.
         return membershipRepository.findByUser(user);

@@ -4,8 +4,10 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -48,6 +50,25 @@ public class MembershipController {
         }
     }
     
+    /**
+     * Leave a club (delete the membership of a user in a club).
+     * 204 on success; 404 if the user or club does not exist, or the user is not a member.
+     * NOTE: the backend has no authentication, so it cannot verify that the caller is {@code userId}.
+     */
+    @DeleteMapping("/user/{userId}/club/{clubId}")
+    public ResponseEntity<?> leaveClub(@PathVariable Long userId, @PathVariable Long clubId) {
+        Optional<User> userOptional = userRepository.findById(userId);
+        Optional<Club> clubOptional = clubRepository.findById(clubId);
+
+        if (userOptional.isEmpty() || clubOptional.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User or Club not found.");
+        }
+        if (membershipService.leaveClub(userOptional.get(), clubOptional.get())) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User is not a member of this club.");
+    }
+
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<Membership>> getMembershipsByUserId(@PathVariable Long userId) {
         Optional<User> userOptional = userRepository.findById(userId);
