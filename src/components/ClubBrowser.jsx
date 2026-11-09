@@ -9,7 +9,6 @@ export default function ClubBrowser({
     clubs,
     joinedClubIds,
     canJoin,
-    joiningClubId = null,
     joiningClubIds = [],
     hasMore = false,
     loadingMore = false,
@@ -29,7 +28,7 @@ export default function ClubBrowser({
     }, [searching, onSearchActiveChange]);
     // CR-001: IDs may be numbers (backend) or strings; always compare normalized.
     const joined = new Set((joinedClubIds ?? []).map(normalizeId).filter((id) => id !== null));
-    const joiningIds = [joiningClubId, ...(joiningClubIds ?? [])];
+    const joiningIds = joiningClubIds ?? [];
 
     return (
         <div className="section-container">

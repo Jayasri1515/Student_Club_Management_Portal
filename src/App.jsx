@@ -12,6 +12,7 @@ import {
     canDeleteActivity,
 } from './utils/permissions.js';
 import { useNotifications } from './hooks/useNotifications.js';
+import { useInFlightSet } from './hooks/useInFlightSet.js';
 import NotificationContainer from './components/Notification.jsx';
 import RenameClubModal from './components/RenameClubModal.jsx';
 import ConfirmDialog from './components/ConfirmDialog.jsx';
@@ -180,21 +181,17 @@ function App() {
     const [renameTarget, setRenameTarget] = useState(null);
     const [renaming, setRenaming] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
-    const [joiningClubIds, setJoiningClubIds] = useState([]);
     const [loadingMoreClubs, setLoadingMoreClubs] = useState(false);
-    // REQ-006: leave club (confirmation target + clubs currently being left)
+    // REQ-006: leave club (confirmation target)
     const [leaveTarget, setLeaveTarget] = useState(null);
-    const [leavingClubIds, setLeavingClubIds] = useState([]);
-    const leavingRef = useRef(new Set());
     // REQ-008: activity edit / delete (dialog targets + save/delete in flight)
     const [editActivityTarget, setEditActivityTarget] = useState(null);
     const [savingActivity, setSavingActivity] = useState(false);
     const [deleteActivityTarget, setDeleteActivityTarget] = useState(null);
-    const [busyActivityIds, setBusyActivityIds] = useState([]);
-    const activityBusyRef = useRef(new Set());
-    // Synchronous guards (state updates are asynchronous, so a fast double click could
-    // otherwise start two requests).
-    const joiningRef = useRef(new Set());
+    // Operations in flight, keyed by club / activity id (double-click guards).
+    const joining = useInFlightSet();
+    const leaving = useInFlightSet();
+    const activityBusy = useInFlightSet();
     const loadingMoreClubsRef = useRef(false);
     const clubsRequestRef = useRef(0);
     const activitiesRequestRef = useRef(0);
@@ -524,13 +521,12 @@ function App() {
             notifyError('This club cannot be joined because it has no ID.');
             return;
         }
-        if (joiningRef.current.has(clubKey)) return;
+        if (joining.has(clubKey)) return;
         if (memberships.some((membership) => sameId(membership?.club?.id, clubKey))) {
             info(`You have already joined ${club.name}.`);
             return;
         }
-        joiningRef.current.add(clubKey);
-        setJoiningClubIds(Array.from(joiningRef.current));
+        joining.add(clubKey);
         try {
             // Existing join endpoint and payload shape.
             const membershipData = {
@@ -544,8 +540,7 @@ function App() {
             if (isAbortError(error)) return;
             notifyError(`Failed to join club: ${error.message}`);
         } finally {
-            joiningRef.current.delete(clubKey);
-            setJoiningClubIds(Array.from(joiningRef.current));
+            joining.remove(clubKey);
         }
     };
 
@@ -560,9 +555,8 @@ function App() {
             notifyError('This membership cannot be removed because the club has no ID.');
             return;
         }
-        if (leavingRef.current.has(clubKey)) return;
-        leavingRef.current.add(clubKey);
-        setLeavingClubIds(Array.from(leavingRef.current));
+        if (leaving.has(clubKey)) return;
+        leaving.add(clubKey);
         const clubName = membership.club?.name ?? `club ${clubKey}`;
         try {
             await apiClient.delete(`/memberships/user/${loggedInUser.id}/club/${clubKey}`, lifeOptions());
@@ -577,15 +571,8 @@ function App() {
                 notifyError(`Failed to leave club: ${error.message}`);
             }
         } finally {
-            leavingRef.current.delete(clubKey);
-            setLeavingClubIds(Array.from(leavingRef.current));
+            leaving.remove(clubKey);
         }
-    };
-
-    const setActivityBusy = (activityKey, busy) => {
-        if (busy) activityBusyRef.current.add(activityKey);
-        else activityBusyRef.current.delete(activityKey);
-        setBusyActivityIds(Array.from(activityBusyRef.current));
     };
 
     // REQ-008: PUT /activities/{id} with { title, description, date } -> 200 with the activity.
@@ -594,8 +581,8 @@ function App() {
     const handleUpdateActivity = async (activity, values) => {
         if (!canUpdateActivity(loggedInUser, activity)) return;
         const activityKey = normalizeId(activity?.id);
-        if (activityKey === null || activityBusyRef.current.has(activityKey)) return;
-        setActivityBusy(activityKey, true);
+        if (activityKey === null || activityBusy.has(activityKey)) return;
+        activityBusy.add(activityKey);
         setSavingActivity(true);
         try {
             const data = await apiClient.put(`/activities/${activityKey}`, values, lifeOptions());
@@ -611,7 +598,7 @@ function App() {
             }
             // 400 and other errors: the dialog stays open so the input is not lost.
         } finally {
-            setActivityBusy(activityKey, false);
+            activityBusy.remove(activityKey);
             setSavingActivity(false);
         }
     };
@@ -621,8 +608,8 @@ function App() {
         setDeleteActivityTarget(null);
         if (!canDeleteActivity(loggedInUser, activity)) return;
         const activityKey = normalizeId(activity?.id);
-        if (activityKey === null || activityBusyRef.current.has(activityKey)) return;
-        setActivityBusy(activityKey, true);
+        if (activityKey === null || activityBusy.has(activityKey)) return;
+        activityBusy.add(activityKey);
         try {
             await apiClient.delete(`/activities/${activityKey}`, lifeOptions());
             success('Activity deleted successfully.');
@@ -632,7 +619,7 @@ function App() {
             notifyError(`Delete Activity Error: ${error.message}`);
             if (error.status === 404) loadActivities();
         } finally {
-            setActivityBusy(activityKey, false);
+            activityBusy.remove(activityKey);
         }
     };
 
@@ -807,7 +794,7 @@ function App() {
                                             activity={activity}
                                             canEdit={canUpdateActivity(loggedInUser, activity)}
                                             canDelete={canDeleteActivity(loggedInUser, activity)}
-                                            busy={busyActivityIds.some((id) => sameId(id, activity?.id))}
+                                            busy={activityBusy.ids.some((id) => sameId(id, activity?.id))}
                                             onEdit={setEditActivityTarget}
                                             onDelete={setDeleteActivityTarget}
                                         />
@@ -832,7 +819,7 @@ function App() {
                             clubs={clubs}
                             joinedClubIds={memberships.map(membership => membership?.club?.id)}
                             canJoin={canJoinClub(loggedInUser)}
-                            joiningClubIds={joiningClubIds}
+                            joiningClubIds={joining.ids}
                             hasMore={clubsPaging.hasMore}
                             loadingMore={loadingMoreClubs}
                             onJoin={handleJoinClub}
@@ -868,7 +855,7 @@ function App() {
                                                     disabled={
                                                         !canLeaveClub(loggedInUser, membership) ||
                                                         normalizeId(membership.club?.id) === null ||
-                                                        leavingClubIds.some((id) => sameId(id, membership.club?.id))
+                                                        leaving.ids.some((id) => sameId(id, membership.club?.id))
                                                     }
                                                     onClick={() => setLeaveTarget(membership)}
                                                 >

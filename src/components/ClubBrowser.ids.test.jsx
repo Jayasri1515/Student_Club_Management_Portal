@@ -21,12 +21,10 @@ const setup = (props = {}) => {
 
 describe('ClubBrowser ID normalization (CR-001)', () => {
   it.each([
-    ['numeric club id, string joiningClubId', numericClubs, { joiningClubId: '2' }],
-    ['string club id, numeric joiningClubId', stringClubs, { joiningClubId: 2 }],
-    ['numeric club id, numeric joiningClubId', numericClubs, { joiningClubId: 2 }],
-    ['string club id, string joiningClubId', stringClubs, { joiningClubId: '2' }],
-    ['numeric club id, joiningClubIds list of strings', numericClubs, { joiningClubIds: ['2'] }],
-    ['string club id, joiningClubIds list of numbers', stringClubs, { joiningClubIds: [2] }],
+    ['numeric club id, string joining id', numericClubs, { joiningClubIds: ['2'] }],
+    ['string club id, numeric joining id', stringClubs, { joiningClubIds: [2] }],
+    ['numeric club id, numeric joining id', numericClubs, { joiningClubIds: [2] }],
+    ['string club id, string joining id', stringClubs, { joiningClubIds: ['2'] }],
   ])('disables only the Join button being processed (%s)', (_label, clubs, props) => {
     setup({ clubs, ...props })
     expect(screen.getByRole('button', { name: 'Join Robotics' })).toBeDisabled()
@@ -35,7 +33,7 @@ describe('ClubBrowser ID normalization (CR-001)', () => {
   })
 
   it('does not disable anything when no join is in progress', () => {
-    setup({ joiningClubId: null })
+    setup({ joiningClubIds: [] })
     expect(screen.getByRole('button', { name: 'Join Chess Club' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Join Robotics' })).toBeEnabled()
   })
@@ -56,7 +54,7 @@ describe('ClubBrowser ID normalization (CR-001)', () => {
   })
 
   it('does not call onJoin for a disabled (in progress) button', async () => {
-    const { onJoin } = setup({ joiningClubId: '1' })
+    const { onJoin } = setup({ joiningClubIds: ['1'] })
     await userEvent.click(screen.getByRole('button', { name: 'Join Chess Club' }))
     expect(onJoin).not.toHaveBeenCalled()
   })
