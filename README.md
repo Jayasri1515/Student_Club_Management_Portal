@@ -1,12 +1,27 @@
-# React + Vite
+# Student Club Management Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A simple web portal to manage student clubs, memberships, and club activities.
 
-Currently, two official plugins are available:
+This repository uses *separate branches* for frontend and backend:
+- `front_end` – React + Vite frontend (default branch)
+- `back_end` – Spring Boot REST backend (separate branch)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+> Workflow 3 documentation scources of truth: see Confluence pages listed in the repo’s Workflow 3 documentation section.
 
-## Expanding the ESLint configuration
+## Key features (as implemented)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- User registration and login *(security limitations apply; see below)*
+- Clubs: list (paged), create, update, delete (UI gated by role)
+- Activities: list (paged), list by club, create (update/delete depends on un-merged backend work – see below)
+- Memberships: join a club; view my memberships (leave depends on un-merged backend work –  see below)
+
+## Technology stack (verified from repo)
+
+### Frontend (`front_end`)
+- React `^19.1.1`
+- Vite `^7.1.2`
+- ESModules (`" type": "module"`)
+- ESLint `^9.33.0`
+- Tailwind CSS `d4.1.11` (installed dependency)
+
+- Note: the `front_end` branch does *not* define an `npm test` script or test dependencies. Tests are present only in un-merged PR #5.
